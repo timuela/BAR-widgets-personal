@@ -18,6 +18,9 @@ local TURRET_NAMES = {
     "cornanotc", "cornanotcplat", "cornanotct2", "cornanotc2plat", "correspawn",
     "legnanotc", "legnanotcplat", "legnanotct2", "legnanotct2plat", "legnanotcbase",
     "armnanotct3", "cornanotct3", "legnanotct3",
+    "armmmkrt31", "armmmkrt32", "armmmkrt33", "armmmkrt34", "armmmkrt35", "armmmkrt36", "armmmkrt37", "armmmkrt38", "armmmkrt39",
+    "cormmkrt31", "cormmkrt32", "cormmkrt33", "cormmkrt34", "cormmkrt35", "cormmkrt36", "cormmkrt37", "cormmkrt38", "cormmkrt39",
+    "legmmkrt31", "legmmkrt32", "legmmkrt33", "legmmkrt34", "legmmkrt35", "legmmkrt36", "legmmkrt37", "legmmkrt38", "legmmkrt39",
 }
 
 local CONVERTER_NAMES = {
@@ -31,6 +34,9 @@ local ENERGY_NAMES = {
     "armafus", "armafust3", "armckfus", "armdf",
     "corafus", "corafust3", "corckfus", "corfus", "coruwfus", "cordf",
     "legafus", "legafust3", "legfus", "freefusion",
+    "armevfus1", "armevfus2", "armevfus3", "armevfus4", "armevfus5", "armevfus6", "armevfus7", "armevfus8", "armevfus9",
+    "corevfus1", "corevfus2", "corevfus3", "corevfus4", "corevfus5", "corevfus6", "corevfus7", "corevfus8", "corevfus9",
+    "legevfus1", "legevfus2", "legevfus3", "legevfus4", "legevfus5", "legevfus6", "legevfus7", "legevfus8", "legevfus9",
     -- Wind Turbines
     "armwin", "armwint2",
     "corwin", "corwint2",
