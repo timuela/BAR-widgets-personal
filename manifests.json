@@ -1,0 +1,402 @@
+[
+  {
+    "id": "gui_zombie_wreck_timers",
+    "version": "2.0.0",
+    "display_name": "Zombie Wreck Timers",
+    "author": "SethDGamre + Egzothicki",
+    "discord_link": "https://discord.com/channels/549281623154229250/1113845509891829810/threads/1530224845953175763",
+    "github_link": "https://github.com/beyond-all-reason/BAR-Widgets/tree/main/Widgets/community/gui_zombie_wreck_timers",
+    "description": "For games with the Zombies modoption. Shows a countdown over every wreck telling you exactly when it reanimates, straight from the timer the game now publishes for this purpose. White with plenty of time, purple as the rise nears, pulsing in the final seconds. The countdown reacts the moment a corpse is reclaimed or resurrected, and a purple '?' marks fogged wrecks whose timer may have changed unseen. Display only.",
+    "last_updated": "2026-08-11T18:00:00.000Z"
+  },
+  {
+    "id": "gui_energy_conversion_meter",
+    "version": "1.2.0",
+    "display_name": "Energy Conversion Meter",
+    "author": "Egzothicki",
+    "discord_link": "https://discord.com/channels/549281623154229250/1532349057287061604",
+    "github_link": "https://github.com/beyond-all-reason/BAR-Widgets/tree/main/Widgets/community/gui_energy_conversion_meter",
+    "description": "Draggable 9-bar meter showing your current imbalance in energy production and energy conversion. It alerts you and makes it stupid simple to know when you're Overflowing vs when you have Idle converters. Severity relative to income, construction-aware both for units and buildings. Styled to match the top bar, with magnet snapping to grid and nearby UI when dragged.",
+    "last_updated": "2026-08-04T12:00:00.000Z"
+  },
+  {
+    "id": "cmd_build_snap",
+    "display_name": "Build Snap (all buildings)",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1411683922999378040",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/cmd_build_snap/cmd_build_snap.lua",
+    "description": "Snaps building placement to the nearest valid build grid point.",
+    "last_updated": "2026-07-31T15:46:50.000Z"
+  },
+  {
+    "id": "gui_juno_impact_range",
+    "display_name": "Juno Impact Range",
+    "author": "Rysica",
+    "discord_link": "https://discord.com/channels/549281623154229250/1527022324191068330",
+    "github_link": "https://github.com/beyond-all-reason/BAR-Widgets/tree/main/Widgets/community/gui_juno_impact_range",
+    "description": "Draws an AOE circle while targeting Juno, and after impact",
+    "last_updated": "2026-07-17T12:00:00.000Z"
+  },
+  {
+    "id": "unit_subgroup_cycle",
+    "version": "1.0.0",
+    "display_name": "Subgroup Cycle",
+    "author": "polnt",
+    "discord_link": "https://discord.com/channels/549281623154229250/1526929578491252737",
+    "github_link": "https://github.com/beyond-all-reason/BAR-Widgets/pull/4",
+    "description": "Press Tab with a mixed control group selected to cycle through its unit types one at a time, StarCraft-2 style, with a visual overlay showing where you are in the cycle.",
+    "last_updated": "2026-07-16T16:45:00.000Z"
+  },
+  {
+    "id": "gui_time_weighted_team_stats",
+    "version": "1.0.0",
+    "display_name": "Time Weighted Team Stats",
+    "author": "tetrisface",
+    "discord_link": "https://discord.com/channels/549281623154229250/1497660088104517632",
+    "github_link": "https://github.com/tetrisface/community-widgets/blob/main/gui_time_weighted_team_stats/gui_time_weighted_team_stats.lua",
+    "description": "Player eco and damage statistics with graph and table fully resizable",
+    "last_updated": "2026-07-15T19:38:37.000Z"
+  },
+  {
+    "id": "gui_ping_wheel",
+    "display_name": "Ping Wheel",
+    "author": "Errrrrrr",
+    "discord_link": "https://discord.com/channels/549281623154229250/1121129869565239306",
+    "github_link": "https://github.com/SSJGabraham/Ping-Wheel",
+    "description": "Displays a ping wheel when a keybind is held down (default Alt+F). Left click for commands, right click for messages.",
+    "last_updated": "2026-07-12T00:00:00.000Z"
+  },
+  {
+    "id": "gui_metal_tracker",
+    "display_name": "Metal Tracker",
+    "author": "Chin",
+    "discord_link": "https://discord.com/channels/549281623154229250/1262082209817296909",
+    "github_link": "https://github.com/DrChinny/BAR-Widgets/blob/main/metal_tracker.lua",
+    "description": "Tracks and displays resources sent to you",
+    "last_updated": "2026-07-12T00:00:00.000Z"
+  },
+  {
+    "id": "gui_factory_queue",
+    "display_name": "Factory Queue",
+    "author": "GammaPath",
+    "discord_link": "https://discord.com/channels/549281623154229250/1513240802783133847",
+    "github_link": "",
+    "description": "Shows and lets you reorder the selected factory's production queue",
+    "last_updated": "2026-07-12T00:00:00.000Z"
+  },
+  {
+    "id": "gui_build_watch",
+    "display_name": "Build Watch",
+    "author": "2Bit",
+    "discord_link": "https://discord.com/channels/549281623154229250/1380031981542445206",
+    "github_link": "",
+    "description": "ETA Time UI for both building and units",
+    "last_updated": "2026-07-12T00:00:00.000Z"
+  },
+  {
+    "id": "gui_build_placement_cost",
+    "display_name": "Build Placement Cost",
+    "author": "lov",
+    "discord_link": "https://discord.com/channels/549281623154229250/1487212028081999912",
+    "github_link": "",
+    "description": "Shows which constructors can help with a planned building, the maximum resource drain of all the constructors nearby, and the build ETA at full build speed",
+    "last_updated": "2026-07-12T00:00:00.000Z"
+  },
+  {
+    "id": "gui_bar_stats_charts",
+    "display_name": "BAR Stats Charts",
+    "author": "FilthyMitch",
+    "discord_link": "https://discord.com/channels/549281623154229250/1481457618617766120",
+    "github_link": "https://github.com/bobmitch/bar_native_charts/tree/main",
+    "description": "Configurable in-game economy, efficiency and combat charts and info cards.",
+    "last_updated": "2026-07-12T00:00:00.000Z"
+  },
+  {
+    "id": "cmd_pipette_build",
+    "display_name": "Pipette Build",
+    "author": "Errrrrrr",
+    "discord_link": "https://discord.com/channels/549281623154229250/1114221140928368780",
+    "github_link": "https://github.com/zxbc/BAR_widgets/blob/main/cmd_pipette_build.lua",
+    "description": "Copy a blueprint of the unit/building under the mouse cursor. Default keybind 'shift-q'. If you copy on top of empty space, the previously successfully copied blueprint will be used again.",
+    "last_updated": "2026-07-12T00:00:00.000Z"
+  },
+  {
+    "id": "cmd_copy_drag_copy_builder",
+    "display_name": "Clone Builder (Drag‑Copy)",
+    "author": "Armis71",
+    "discord_link": "https://discord.com/channels/549281623154229250/1525551287301574717",
+    "github_link": "https://github.com/Armis71/BAR-Widgets-Public/blob/main/drag_copy_builder.lua",
+    "description": "Builds clones of what you have on the map already, highlight and drag.",
+    "last_updated": "2026-07-12T00:00:00.000Z"
+  },
+  {
+    "id": "gui_build_category_cycle_keys",
+    "display_name": "Build Category Cycle Keys",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1525222222812151871",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/gui_build_category_cycle_keys/gui_build_category_cycle_keys.lua",
+    "description": "The Z/X/C/V keys cycle through the selected builder's Economy/Combat/Utility/Production build options.",
+    "last_updated": "2026-07-10T00:00:00.000Z"
+  },
+  {
+    "id": "gui_magic_ping",
+    "display_name": "Magic Ping",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1524805642127282236",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/gui_magic_ping/gui_magic_ping.lua",
+    "description": "Invoking a default Ping (map marker) near a unit or thing, automatically labels it.",
+    "last_updated": "2026-07-09T00:00:00.000Z"
+  },
+  {
+    "id": "gui_translate_chat",
+    "display_name": "Translate Chat",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1523400051790188555",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/tree/main/gui_translate_chat/gui_translate_chat.lua",
+    "description": "Translates incoming chat messages using a local LibreTranslate instance.",
+    "last_updated": "2026-07-04T00:00:00.000Z"
+  },
+  {
+    "id": "gui_scroll_queue",
+    "display_name": "Scroll to Queue",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1519806457581801685",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/gui_scroll_queue/gui_scroll_queue.lua",
+    "description": "Use the mouse wheel to add/remove units from the factory build queue while hovering the build menu.",
+    "last_updated": "2026-06-25T00:00:00.000Z"
+  },
+  {
+    "id": "cmd_squads",
+    "display_name": "Squads",
+    "author": "uBdead",
+    "discord_link": "",
+    "github_link": "",
+    "description": "Selecting a group of units will create a squad, which can be selected as a whole by clicking near them.",
+    "last_updated": "2026-06-17T00:00:00.000Z"
+  },
+  {
+    "id": "gui_extended_eta_info",
+    "display_name": "Extended ETA Info",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1495385731047362701",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/gui_extended_eta_info/gui_extended_eta_info.lua",
+    "description": "Shows remaining metal cost below the build ETA",
+    "last_updated": "2026-04-18T00:00:00.000Z"
+  },
+  {
+    "id": "gui_minimap_extra_damage_fields",
+    "display_name": "Minimap Extra - Damage Fields",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1413589308928954369",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/tree/main/gui_minimap_extra_damage_fields",
+    "description": "Enhances the minimap with damage visualization that fades over time",
+    "last_updated": "2026-04-12T16:15:57.000Z"
+  },
+  {
+    "id": "gui_resource_panels",
+    "display_name": "Resource Panels",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1492974939689586799",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/gui_resource_panels/gui_resource_panels.lua",
+    "description": "Shows the amount of metal/energy units are using during Resource Mode screenmode with world-view labels and an overview breakdown panel.",
+    "last_updated": "2026-04-12T00:00:00.000Z"
+  },
+  {
+    "id": "gui_ubdev",
+    "display_name": "Cheat Interface",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1430592018534633523",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/tree/main/gui_ubdev",
+    "description": "Provides a GUI for the build in cheat functionalities.",
+    "last_updated": "2026-04-11T11:05:37.000Z"
+  },
+  {
+    "id": "gui_widgets_presets",
+    "display_name": "Widget Presets",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1492234171500855387",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/tree/main/gui_widgets_presets",
+    "description": "Stores and applies presets of widget states, with automatic mode switching for Player/Spectator/Replay.",
+    "last_updated": "2026-04-10T00:00:00.000Z"
+  },
+  {
+    "id": "cmd_close_enough",
+    "display_name": "Close Enough",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1491507955739131956",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/cmd_close_enough/cmd_close_enough.lua",
+    "description": "Clicking right next to a unit (so missing it), will just select it anyway.",
+    "last_updated": "2026-04-08T20:07:47.000Z"
+  },
+  {
+    "id": "gui_adaptive_graphics",
+    "display_name": "Adaptive Graphics",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1491490751320690689",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/gui_adaptive_graphics/gui_adaptive_graphics.lua",
+    "description": "Adjusts graphics settings based on performance.",
+    "last_updated": "2026-04-07T17:45:38.000Z"
+  },
+  {
+    "id": "gui_sensor_ranges_radar_preview_all",
+    "display_name": "Sensor Ranges Radar Preview (All radars)",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1405218640952950874",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/gui_sensor_ranges_radar_preview_all/gui_sensor_ranges_radar_preview_all.lua",
+    "description": "Shows Radar Range Coverage on ALL Radars",
+    "last_updated": "2026-04-06T10:06:38.000Z"
+  },
+  {
+    "id": "gui_chat_filter",
+    "display_name": "Chat Filter",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1440115550994043000",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/tree/main/gui_chat_filter",
+    "description": "Censors, modifies or blocks chat messages based on user-defined rules.",
+    "last_updated": "2025-11-17T22:55:04.000Z"
+  },
+  {
+    "id": "unit_cheerleaders",
+    "display_name": "Cheerleaders",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1432418226691637289",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/unit_cheerleaders/unit_cheerleaders.lua",
+    "description": "Your units have become aware of the 4th dimension and are trying to communicate",
+    "last_updated": "2025-10-27T17:14:04.000Z"
+  },
+  {
+    "id": "gui_coach",
+    "display_name": "Coach",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1396184277527429220",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/gui_coach/gui_coach.lua",
+    "description": "Gives a list of things you should probably do to play well.",
+    "last_updated": "2025-10-24T19:57:40.000Z"
+  },
+  {
+    "id": "cmd_area_rebuild",
+    "display_name": "Area Rebuild",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1425581260730007603",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/cmd_area_rebuild/cmd_area_rebuild.lua",
+    "description": "Rebuilds the selected area.",
+    "last_updated": "2025-10-23T17:45:38.000Z"
+  },
+  {
+    "id": "gui_event_log",
+    "display_name": "Battle Log",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1422293569812824065",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/tree/main/gui_event_log",
+    "description": "Displays important battle events in a log",
+    "last_updated": "2025-10-22T11:39:32.000Z"
+  },
+  {
+    "id": "gui_control_hints",
+    "display_name": "Control Hints",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1426919778232303686",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/tree/main/gui_control_hints",
+    "description": "Show little hints about controls when in the proper context",
+    "last_updated": "2025-10-13T16:56:43.000Z"
+  },
+  {
+    "id": "cmd_factory_always_alt",
+    "display_name": "Factory Always-Alt Queue",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1396197172675874868",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/cmd_factory_always_alt.lua",
+    "description": "Always queue certain units (e.g. constructors) with alt (priority) in factories.",
+    "last_updated": "2025-10-05T20:07:47.000Z"
+  },
+  {
+    "id": "gui_top_bar_extra",
+    "display_name": "Top Bar Extra",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1406718438801543339",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/gui_top_bar_extra/gui_top_bar_extra.lua",
+    "description": "Adds a more detailed resource display.",
+    "last_updated": "2025-10-05T20:06:23.000Z"
+  },
+  {
+    "id": "unit_lazy_reclaimers",
+    "display_name": "Lazy Reclaimers",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1417962028315971765",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/unit_lazy_reclaimers/unit_lazy_reclaimers.lua",
+    "description": "Reclaimers will stop reclaiming when the metal/energy storage is full.",
+    "last_updated": "2025-10-02T16:46:34.000Z"
+  },
+  {
+    "id": "gui_more_range_indicators",
+    "display_name": "More Range Indicators",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1423347398025150576",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/tree/main/gui_more_range_indicators",
+    "description": "Shows vision range indicators with shader rendering.",
+    "last_updated": "2025-10-02T15:43:11.000Z"
+  },
+  {
+    "id": "unit_con_gtfo",
+    "display_name": "Constructors GTFO",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1416848378884653076",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/unit_con_gtfo/unit_con_gtfo.lua",
+    "description": "Makes constructors leave the factory faster by giving them a move order immediately after they finish.",
+    "last_updated": "2025-09-14T18:07:46.000Z"
+  },
+  {
+    "id": "unit_builders_are_lazy",
+    "display_name": "Builders Are Lazy",
+    "author": "uBdead",
+    "discord_link": "",
+    "github_link": "",
+    "description": "Builders will idle instead of guarding after building (to become available from the idle mechanic)",
+    "last_updated": "2025-09-11T16:16:22.000Z"
+  },
+  {
+    "id": "gui_minimap_extra_idle_indicators",
+    "display_name": "Minimap Extra - Idle Indicators",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1413590029753782385",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/gui_minimap_extra_idle_indicators",
+    "description": "Adds yellow blips that go on and off to get your attention as an extra way to see where your idle builders are.",
+    "last_updated": "2025-09-05T00:00:00.000Z"
+  },
+  {
+    "id": "map_camera_startup",
+    "display_name": "Map Camera Startup",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1399506378057453669",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/map_camera_startup/map_camera_startup.lua",
+    "description": "When entering the game, zoom out and center the camera to show the whole map.",
+    "last_updated": "2025-08-27T09:14:34.000Z"
+  },
+  {
+    "id": "gui_point_tracker_advanced",
+    "display_name": "Point Tracker Advanced",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1396193562449674372",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/gui_point_tracker_advanced/gui_point_tracker_advanced.lua",
+    "description": "Allows for customizable pings/map markers.",
+    "last_updated": "2025-08-27T09:14:34.000Z"
+  },
+  {
+    "id": "cmd_factory_quota_meta",
+    "display_name": "Manipulate Factory Quota by holding Meta/Spacebar",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1406011575772647474",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/cmd_factory_quota_meta/cmd_factory_quota_meta.lua",
+    "description": "Holding Meta (spacebar) will manipulate the factory quota while clicking build orders in grid menu.",
+    "last_updated": "2025-08-27T09:14:34.000Z"
+  },
+  {
+    "id": "cmd_cbot_copy_queue",
+    "display_name": "Constructors copy queue of Constructors",
+    "author": "uBdead",
+    "discord_link": "https://discord.com/channels/549281623154229250/1396189267998539919",
+    "github_link": "https://github.com/WybrenKoelmans/BAR-Widgets/blob/main/cmd_cbot_copy_queue/cmd_cbot_copy_queue.lua",
+    "description": "Instead of guarding a Constructors, they will just copy the orders.",
+    "last_updated": "2025-08-27T09:14:34.000Z"
+  }
+]
