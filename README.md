@@ -14,15 +14,30 @@ Dynamically chain-advances your builder's queue based on each build's ETA: the w
 
 Toggle it from the builder's command menu; it cycles through three modes:
 
-Off
+**⏸️ Off**
 
-On: automatic. The advance threshold adapts to each nanoframe's remaining ETA: under ~5s it advances immediately, under ~15s at 30%, under ~25s at 60%, longer builds at 90%.
+**▶️ On — automatic**
 
-On also hands the nanoframe off: it pulls a nearby free nano turret onto the nanoframe, and only advances once a nano turret is actually assisting, so the frame still gets finished.
+The advance threshold adapts to each nanoframe's remaining ETA:
 
-Decay guard: it tracks the nanoframes in the builder's own queue and watches their build rate. A decaying nanoframe is prioritized, and once the builder is free it inserts a repair order to rescue it before moving on.
+- under ~5s → advances immediately
+- under ~15s → at 30%
+- under ~25s → at 60%
+- longer builds → at 90%
 
-YOLO: no guards at all. It advances the moment a nanoframe is under way, ignoring ETA, threshold, progress and whether anything is assisting — rapid-fire placing, leaving the frames where they land. A builder you explicitly put on hold still stays held.
+*Waits for nano assist*
+
+- Pulls a nearby free nano turret onto the nanoframe, and only advances once a nano turret is actually assisting, so the frame still gets finished.
+
+*Decay guard*
+
+- Tracks the nanoframes in the builder's own queue and watches their build rate. A decaying nanoframe is prioritized, and once the builder is free it inserts a repair order to rescue it before moving on.
+
+**🔥 YOLO**
+
+No guards at all. Advances the moment a nanoframe is under way, ignoring ETA, threshold, progress and whether anything is assisting — rapid-fire placing, leaving the frames where they land. A builder you explicitly put on hold still stays held.
+
+This widget is meant as a replacement of Holo Place and in preparation for widgethub.
 
 [Download Dynamic Queue](https://github.com/timuela/BAR-widgets/blob/main/dynamic_queue.lua)
 
