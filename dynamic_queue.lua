@@ -41,7 +41,7 @@ local CMD_DYNAMIC_QUEUE_DESCRIPTION = {
 local ETA_STEPS = {
 	{ eta = 5,  threshold = 0 },  -- < 5s left: advance immediately
 	{ eta = 15, threshold = 0.3 }, -- < 15s: advance at 30%
-	{ eta = 25, threshold = 0.6 }, -- < 30s: advance at 60%
+	{ eta = 25, threshold = 0.6 }, -- < 25s: advance at 60%
 	{ eta = math.huge, threshold = 0.9 }, -- longer: advance at 90%
 }
 

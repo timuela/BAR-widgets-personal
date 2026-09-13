@@ -8,27 +8,27 @@ It will check if you're playing Full Metal Plate map or not.
 
 ![grid](img/grid.png)
 
-# Added more options to Holo Place
+# Dynamic Queue
 
-Automatically place the next building in your build queue once the current structure reaches a defined completion threshold. This helps maintain building momentum by minimizing idle time as the construction unit walks between placement locations.
+Dynamically chain-advances your builder's queue based on each build's ETA: the widget measures real build speed and shifts the advance threshold on the fly — quick to move on from short builds, more patient with long ones.
 
-You can configure when the next placement should trigger using the following options:
+Toggle it from the builder's command menu; it cycles through three modes:
 
-Ins: Instant
+Off
 
-30: When 30% of the current building is completed
+On: automatic. The advance threshold adapts to each nanoframe's remaining ETA: under ~5s it advances immediately, under ~15s at 30%, under ~25s at 60%, longer builds at 90%.
 
-60: When 60% of the current building is completed
+On also hands the nanoframe off: it pulls a nearby free nano turret onto the nanoframe, and only advances once a nano turret is actually assisting, so the frame still gets finished.
 
-90: When 90% of the current building is completed
+Decay guard: it tracks the nanoframes in the builder's own queue and watches their build rate. A decaying nanoframe is prioritized, and once the builder is free it inserts a repair order to rescue it before moving on.
 
-Credit to original author: manshanko
+YOLO: no guards at all. It advances the moment a nanoframe is under way, ignoring ETA, threshold, progress and whether anything is assisting — rapid-fire placing, leaving the frames where they land. A builder you explicitly put on hold still stays held.
 
-[Download Holo Place (Default version, will force a turret to assist, if no available turrets, it'll pause)](https://github.com/timuela/BAR-widgets/blob/main/holo_place.lua)
+[Download Dynamic Queue](https://github.com/timuela/BAR-widgets/blob/main/dynamic_queue.lua)
 
-[Download Holo Place (No-hijacking version, ignore turrets requirement.)](https://github.com/timuela/BAR-widgets/blob/main/holo_place_no_hijacking.lua)
+![dynamicqueue](img/dynamic_queue.png)
 
-![holo](img/holoplace.png)
+[Watch the dynamic_queue demo (video)](video/dynamic_queue.mp4)
 
 # Auto Dgun for nuttyb raptor
 
