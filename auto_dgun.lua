@@ -10,7 +10,6 @@ function widget:GetInfo()
     }
 end
 
-local echo = Spring.Echo
 local i18n = BAR.I18N
 local GetSelectedUnits = Spring.GetSelectedUnits
 local GetUnitDefID = Spring.GetUnitDefID
@@ -147,7 +146,6 @@ function widget:GameFrame(frame)
         if commanderDefIDs[defID] then
             local ux, uy, uz = GetUnitPosition(unitID)
             if ux then
-                local found = false
                 local units = GetUnitsInCylinder(ux, uz, 600)
                 for _, otherID in ipairs(units) do
                     if otherID ~= unitID then
@@ -156,15 +154,10 @@ function widget:GameFrame(frame)
                             local tx, ty, tz = GetUnitPosition(otherID)
                             if tx then
                                 GiveOrderToUnit(unitID, CMD_DGUN, {tx, ty, tz}, {})
-                                echo("Auto-DGun: Commander " .. unitID .. " DGunned target " .. otherID)
-                                found = true
                                 break
                             end
                         end
                     end
-                end
-                if not found then
-                    echo("Checked: No target in range for commander " .. unitID)
                 end
             end
         end

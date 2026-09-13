@@ -28,8 +28,6 @@ YOLO: no guards at all. It advances the moment a nanoframe is under way, ignorin
 
 ![dynamicqueue](img/dynamic_queue.png)
 
-[Watch the dynamic_queue demo (video)](video/dynamic_queue.mp4)
-
 # Auto Dgun for nuttyb raptor
 
 **What it does**
