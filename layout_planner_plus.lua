@@ -33,7 +33,7 @@ if not (Json and Json.encode and Json.decode) then
   if ok and type(lib) == "table" and lib.encode and lib.decode then
     Json = lib
   else
-    Spring.Echo("[LayoutPlus] JSON library unavailable: profiles cannot be read or written")
+    Spring.Echo("[LayoutPlannerPlus] JSON library unavailable: profiles cannot be read or written")
   end
 end
 
@@ -366,7 +366,7 @@ end
 
 local function ClearCurrentLayout()
   currentLayout.lines = {}
-  Spring.Echo("[LayoutPlus] Cleared current layout")
+  Spring.Echo("[LayoutPlannerPlus] Cleared current layout")
 end
 
 local function AddLineBU(x1, z1, x2, z2)
@@ -449,7 +449,7 @@ local function UpdateKeyTranslation(dt)
   local tx, tz = GetSnappedCameraDirection(dx, dz)
   if tx ~= 0 or tz ~= 0 then
     TranslateLayout(tx, tz)
-    Spring.Echo("[LayoutPlus] Translated layout by (" .. tx .. ", " .. tz .. ")")
+    Spring.Echo("[LayoutPlannerPlus] Translated layout by (" .. tx .. ", " .. tz .. ")")
   end
 end
 
@@ -488,11 +488,11 @@ end
 
 local function SaveLayoutAs(name, tags)
   if not ComputeBounds(currentLayout) then
-    Spring.Echo("[LayoutPlus] Nothing to save")
+    Spring.Echo("[LayoutPlannerPlus] Nothing to save")
     return
   end
   if not Json then
-    Spring.Echo("[LayoutPlus] Cannot save: no JSON library available")
+    Spring.Echo("[LayoutPlannerPlus] Cannot save: no JSON library available")
     return
   end
 
@@ -537,19 +537,19 @@ local function SaveLayoutAs(name, tags)
 
   local ok, text = pcall(Json.encode, profile)
   if not ok then
-    Spring.Echo("[LayoutPlus] Could not encode " .. filename .. ": " .. tostring(text))
+    Spring.Echo("[LayoutPlannerPlus] Could not encode " .. filename .. ": " .. tostring(text))
     return
   end
 
   local f = io.open(filename, "w")
   if not f then
-    Spring.Echo("[LayoutPlus] Could not open " .. filename .. " for write")
+    Spring.Echo("[LayoutPlannerPlus] Could not open " .. filename .. " for write")
     return
   end
   f:write(text)
   f:close()
 
-  Spring.Echo("[LayoutPlus] Saved layout as " .. filename)
+  Spring.Echo("[LayoutPlannerPlus] Saved layout as " .. filename)
 end
 
 local function CopyEmptyLayout()
@@ -559,7 +559,7 @@ end
 local function LoadLayoutData(raw)
   local layout = CopyEmptyLayout()
   if type(raw) ~= "table" or type(raw.layout) ~= "table" then
-    Spring.Echo("[LayoutPlus] LoadLayoutData: no layout data")
+    Spring.Echo("[LayoutPlannerPlus] LoadLayoutData: no layout data")
     return layout
   end
 
@@ -642,7 +642,7 @@ local function RefreshSavedLayouts()
           data     = layout,
         }
       else
-        Spring.Echo("[LayoutPlus] Could not read " .. short .. ": " .. tostring(err))
+        Spring.Echo("[LayoutPlannerPlus] Could not read " .. short .. ": " .. tostring(err))
       end
     end
   end
@@ -1167,11 +1167,11 @@ function widget:MousePress(mx, my, button)
       -- While load popup is open or a layout is attached to the mouse,
       -- do NOT allow toggling draw mode.
       if loadPopupVisible or selectedData then
-        Spring.Echo("[LayoutPlus] Finish or cancel layout placement before toggling Draw")
+        Spring.Echo("[LayoutPlannerPlus] Finish or cancel layout placement before toggling Draw")
         return true
       end
       drawingMode = not drawingMode
-      Spring.Echo("[LayoutPlus] Drawing: " .. (drawingMode and "ON" or "OFF"))
+      Spring.Echo("[LayoutPlannerPlus] Drawing: " .. (drawingMode and "ON" or "OFF"))
       return true
     end
     if MainButtonHit(mx, my, btns.clear.x, btns.clear.y, BTN_W, BTN_H) then
@@ -1196,15 +1196,15 @@ function widget:MousePress(mx, my, button)
         RefreshSavedLayouts()
         ApplySearchFilter()
       else
-        Spring.Echo("[LayoutPlus] No saved layouts found")
+        Spring.Echo("[LayoutPlannerPlus] No saved layouts found")
       end
       return true
     end
     if MainButtonHit(mx, my, btns.render.x, btns.render.y, BTN_W, BTN_H) then
       -- Render current layout as game map markers using queue (gradual rendering)
-      Spring.Echo("[LayoutPlus] Render button clicked - queuing lines for rendering")
+      Spring.Echo("[LayoutPlannerPlus] Render button clicked - queuing lines for rendering")
       CollectAndDraw()
-      Spring.Echo("[LayoutPlus] Queued " .. #drawLineQueue .. " lines for gradual rendering")
+      Spring.Echo("[LayoutPlannerPlus] Queued " .. #drawLineQueue .. " lines for gradual rendering")
       renderTimer = 0
       return true
     end
@@ -1222,7 +1222,7 @@ function widget:MousePress(mx, my, button)
           lineSnapMode = i
           local labels = {"Off", "Intersect", "Mid", "Third"}
           local steps = {"none", "3 BU (48 IGU)", "1.5 BU (24 IGU)", "1 BU (16 IGU)"}
-          Spring.Echo("[LayoutPlus] Line snap: " .. labels[i+1] .. " (mode " .. i .. ", step: " .. steps[i+1] .. ")")
+          Spring.Echo("[LayoutPlannerPlus] Line snap: " .. labels[i+1] .. " (mode " .. i .. ", step: " .. steps[i+1] .. ")")
           return true
         end
         x = x + w + 4
@@ -1240,7 +1240,7 @@ function widget:MousePress(mx, my, button)
         selectedData   = item.data
         layoutRotation = 0
         layoutInverted = false
-        Spring.Echo("[LayoutPlus] Activated layout: " .. tostring(item.name or "?"))
+        Spring.Echo("[LayoutPlannerPlus] Activated layout: " .. tostring(item.name or "?"))
         return true
       end
     end
@@ -1257,7 +1257,7 @@ function widget:MousePress(mx, my, button)
       -- Disable widget (user can re-enable via F11 menu)
       if not exitButtonClicked then
         exitButtonClicked = true
-        Spring.Echo("[LayoutPlus] Widget disabled. Re-enable via F11 menu.")
+        Spring.Echo("[LayoutPlannerPlus] Widget disabled. Re-enable via F11 menu.")
         if widgetHandler and widgetHandler.RemoveWidget then
           widgetHandler:RemoveWidget(widget)
         end
@@ -1316,17 +1316,17 @@ function widget:MousePress(mx, my, button)
           -- First translate to cursor-relative position
           local tx1, tz1 = ln[1] + (bx - shiftX), ln[2] + (bz - shiftZ)
           local tx2, tz2 = ln[3] + (bx - shiftX), ln[4] + (bz - shiftZ)
-          
+
           -- Then apply rotation/inversion relative to the placed center (bx, bz)
           local relX1, relZ1 = TransformBU(tx1 - bx, tz1 - bz, layoutRotation, layoutInverted)
           local relX2, relZ2 = TransformBU(tx2 - bx, tz2 - bz, layoutRotation, layoutInverted)
-          
+
           -- Final position
           local sx1, sz1 = relX1 + bx, relZ1 + bz
           local sx2, sz2 = relX2 + bx, relZ2 + bz
           AddLineBU(sx1, sz1, sx2, sz2)
         end
-        Spring.Echo("[LayoutPlus] Placed layout at cursor")
+        Spring.Echo("[LayoutPlannerPlus] Placed layout at cursor")
         -- stop following the mouse after placement and restore drawing state
         selectedData  = nil
         selectedIndex = nil
@@ -1423,7 +1423,7 @@ function widget:MouseRelease(mx, my, button)
     if dx <= 1 and dz <= 1 then
       -- click: remove nearest line
       if not RemoveNearestLine(bx, bz, 10) then
-        Spring.Echo("[LayoutPlus] No line near click")
+        Spring.Echo("[LayoutPlannerPlus] No line near click")
       end
     else
       -- box selection: remove lines whose midpoint is inside box
@@ -1437,7 +1437,7 @@ function widget:MouseRelease(mx, my, button)
           table.remove(currentLayout.lines, i)
         end
       end
-      Spring.Echo("[LayoutPlus] Removed lines in box")
+      Spring.Echo("[LayoutPlannerPlus] Removed lines in box")
     end
     removeDragStart = nil
     return true
@@ -1509,7 +1509,7 @@ function widget:KeyPress(key, mods, isRepeat)
   if key == 27 and not loadPopupVisible and not showSaveDialog and not selectedData then
     if drawingMode then
       drawingMode = false
-      Spring.Echo("[LayoutPlus] Drawing: OFF (ESC)")
+      Spring.Echo("[LayoutPlannerPlus] Drawing: OFF (ESC)")
       return true
     end
   end
@@ -1518,20 +1518,14 @@ function widget:KeyPress(key, mods, isRepeat)
   if selectedData then
     if key == 114 then -- 'r' key
       layoutRotation = (layoutRotation + 90) % 360
-      Spring.Echo("[LayoutPlus] Rotation: " .. layoutRotation .. "°")
+      Spring.Echo("[LayoutPlannerPlus] Rotation: " .. layoutRotation .. "°")
       return true
     elseif key == 105 then -- 'i' key
       layoutInverted = not layoutInverted
-      Spring.Echo("[LayoutPlus] Inverted: " .. (layoutInverted and "Yes" or "No"))
+      Spring.Echo("[LayoutPlannerPlus] Inverted: " .. (layoutInverted and "Yes" or "No"))
       return true
     end
   end
-
-  -- The movement itself happens in Update, from the polled key state. The press
-  -- is still claimed here so the engine's own binds for these letters - wait,
-  -- attack, manualfire - do not fire while a layout is being nudged. A press
-  -- BAR consumes first (S during the prepare phase) never reaches this, which
-  -- is exactly why the movement could not live here in the first place.
   if allowTranslationByKeys and not showSaveDialog and not loadPopupVisible and not selectedData then
     if key == 119 or key == 115 or key == 97 or key == 100 then
       return true
@@ -1546,13 +1540,9 @@ function widget:MouseWheel(up, value)
     local maxVisible = 18  -- Match the display maxVisible
     local totalItems = #filteredLayouts
     local maxScroll = math.max(0, totalItems - maxVisible)
-    
-    -- Mouse wheel: reverse the logic to match user expectation
-    -- When user scrolls "up" (wheel away), they want to see items higher in the list (decrease offset)
-    -- When user scrolls "down" (wheel toward), they want to see items lower in the list (increase offset)
-    if not up then  -- Reversed: "not up" means scroll up in the list
+    if not up then
       listScrollOffset = math.max(0, listScrollOffset - 1)
-    else  -- "up" means scroll down in the list
+    else
       listScrollOffset = math.min(maxScroll, listScrollOffset + 1)
     end
     return true
@@ -1676,9 +1666,15 @@ function widget:DrawScreen()
     end
   end
 
-  -- hint text
+  -- Key hints. A layout armed for placement answers to different keys than one
+  -- still being drawn, so the line shows whichever set is live right now.
   gl.Color(1,1,1,0.8)
-  local hintText = "LMB Lines, RMB remove | WASD: move placed layout"
+  local hintText
+  if selectedData then
+    hintText = "LMB place | R rotate | I invert | ESC cancel"
+  else
+    hintText = "LMB Lines | RMB remove | WASD move | ESC draw off"
+  end
   gl.Text(hintText, mainX + 10, mainY + 10, 11, "")
 
   -- load popup
@@ -1868,7 +1864,6 @@ function widget:DrawScreen()
     SetGlassBlur("layoutplannerplus_load", nil)
   end
 
-  -- save dialog
   DrawSaveDialog()
 end
 
@@ -1976,7 +1971,7 @@ end
 --------------------------------------------------------------------------------
 
 function widget:Initialize()
-  Spring.Echo("[LayoutPlus] ===== INITIALIZING LayoutPlannerPlus =====")
+  Spring.Echo("[LayoutPlannerPlus] ===== INITIALIZING LayoutPlannerPlus =====")
   RefreshGlass()
   EnsureLayoutDir()
   RefreshSavedLayouts()
@@ -1987,9 +1982,9 @@ function widget:Initialize()
   mainX, mainY = MidScreen(vsx, vsy, MAIN_WIDTH, h)
   -- Start load popup over the main window
   loadX, loadY = mainX, mainY
-  Spring.Echo("[LayoutPlus] LayoutPlannerPlus initialized, found " .. tostring(#savedLayouts) .. " layouts")
-  Spring.Echo("[LayoutPlus] To save with name: /luaui layoutplus_save <name>")
-  Spring.Echo("[LayoutPlus] ===== INITIALIZATION COMPLETE =====")
+  Spring.Echo("[LayoutPlannerPlus] LayoutPlannerPlus initialized, found " .. tostring(#savedLayouts) .. " layouts")
+  Spring.Echo("[LayoutPlannerPlus] To save with name: /luaui layoutplus_save <name>")
+  Spring.Echo("[LayoutPlannerPlus] ===== INITIALIZATION COMPLETE =====")
 end
 
 -- Keep the main window centered when the screen size changes
@@ -2032,7 +2027,6 @@ function widget:Update(dt)
 
   -- Draw slowly: Spring drops marker lines if they are added too quickly
   -- (draw spam protection). 10 lines per 0.1s is the proven safe rate
-  -- (see map_nuttyb_raptor_grid_draw.lua).
   renderTimer = renderTimer + dt
   if renderTimer < 0.1 then return end
   renderTimer = 0
@@ -2049,7 +2043,7 @@ function widget:Update(dt)
 
   if #drawLineQueue == 0 then
     renderingToGame = false
-    Spring.Echo("[LayoutPlus] All lines rendered")
+    Spring.Echo("[LayoutPlannerPlus] All lines rendered")
   end
 end
 
