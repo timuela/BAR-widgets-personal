@@ -2,7 +2,7 @@ function widget:GetInfo()
   return {
     name    = "LayoutPlannerPlus",
     desc    = "Modern layout editor + library with named saves, thumbnails, and intuitive tools",
-    author  = "Custom",
+    author  = "Noryon, loadwolf3d, timuela",
     date    = "2025-12-02",
     license = "MIT",
     layer   = 0,
@@ -11,7 +11,7 @@ function widget:GetInfo()
 end
 
 --------------------------------------------------------------------------------
--- Constants & basics (match original LayoutPlanner where useful)
+-- Constants & basics
 --------------------------------------------------------------------------------
 
 local Spring = Spring
@@ -25,8 +25,6 @@ local CHUNK_SIZE  = 4 * SQUARE_SIZE
 
 local LAYOUT_DIR  = "LuaUI/Widgets/layout_planner_plus/"
 
--- Profiles are JSON. The game ships the codec, and using it for both directions
--- means the file shape cannot drift from something a parser will accept.
 local Json = Json
 if not (Json and Json.encode and Json.decode) then
   local ok, lib = pcall(VFS.Include, "common/luaUtilities/json.lua")
@@ -36,6 +34,9 @@ if not (Json and Json.encode and Json.decode) then
     Spring.Echo("[LayoutPlannerPlus] JSON library unavailable: profiles cannot be read or written")
   end
 end
+
+local Editbox = VFS.Include("luaui/Include/keybind_editbox.lua")
+local Search  = VFS.Include("luaui/Include/search.lua")
 
 --------------------------------------------------------------------------------
 -- Layout data
@@ -61,12 +62,11 @@ local wasDrawingBeforeLoad = false
 
 -- Save dialog
 local showSaveDialog   = false
-local saveNameText     = ""
 
 -- Line snap modes: 0=none, 1=intersections, 2=midpoints, 3=thirds
 local lineSnapMode     = 1      -- default to intersections
 
--- Rendering queue (for gradual rendering to avoid lag)
+-- Rendering queue (for gradual rendering)
 local drawLineQueue    = {}
 local renderTimer      = 0
 local renderingToGame  = false
@@ -80,18 +80,14 @@ local filteredLayouts  = {}
 local exitButtonClicked = false  -- Prevent exit button message spam
 local selectedIndex    = nil    -- index into filteredLayouts
 local selectedData     = nil    -- layout table of selected
-local searchText       = ""
 local listScrollOffset = 0      -- scroll offset for layout list (in items)
+local scrollDragging   = false  -- the popup's scrollbar is being dragged
+
+local searchBox, nameBox
 
 -- Layout transformation state (for selected layout preview/placement)
 local layoutRotation   = 0      -- rotation angle in degrees (0, 90, 180, 270)
 local layoutInverted  = false  -- horizontal inversion (flip x)
-
--- Simple blink helper for text carets
-local function IsCaretVisible()
-  local t = Spring.GetGameSeconds and Spring.GetGameSeconds() or os.clock()
-  return (t % 1.0) < 0.5
-end
 
 --------------------------------------------------------------------------------
 -- Glass UI: FlowUI-based skin matching BAR's F11 widget selector
@@ -114,8 +110,6 @@ local GLASS = {
   loadFill     = { 0.16, 0.26, 0.52, 1 },
   renderFill   = { 0.30, 0.20, 0.50, 1 },
   accentFill   = { 0.20, 0.42, 0.68, 1 },
-  barTrack     = { 0, 0, 0, 0.35 },
-  barThumb     = { 1, 1, 1, 0.35 },
 }
 
 -- FlowUI's button gradients a fill from a darker bottom to itself on top.
@@ -141,19 +135,17 @@ local function RefreshGlass()
     glass.ready = false
     return
   end
-  glass.element        = f.Draw.Element
-  glass.button         = f.Draw.Button
-  glass.rectRound      = f.Draw.RectRound
-  glass.highlight      = f.Draw.SelectHighlight
-  glass.elementCorner  = f.elementCorner or 4
-  glass.elementPadding = f.elementPadding or 4
-  glass.opacity        = f.clampedOpacity or 1
+  glass.element          = f.Draw.Element
+  glass.button           = f.Draw.Button
+  glass.rectRound        = f.Draw.RectRound
+  glass.highlight        = f.Draw.SelectHighlight
+  glass.scroller         = f.Draw.Scroller
+  glass.scrollerGeometry = f.Draw.ScrollerGeometry
+  glass.elementCorner    = f.elementCorner or 4
+  glass.elementPadding   = f.elementPadding or 4
+  glass.opacity          = f.clampedOpacity or 1
   glass.ready          = (f.Draw.Element and f.Draw.RectRound and f.Draw.Button and f.Draw.SelectHighlight)
     and true or false
-end
-
-local function InRect(mx, my, l, b, r, t)
-  return mx >= l and mx <= r and my >= b and my <= t
 end
 
 -- Blur regions handed to gfx_guishader. A list is only rebuilt when its rect
@@ -239,6 +231,23 @@ local function GlassButton(l, b, r, t, fill, hovered)
   end
 end
 
+-- A list row's lit state: the selector's fill for the chosen row, a soft white
+-- wash under the cursor otherwise. Both lists light their rows the same way.
+local function MarkRow(l, b, r, t, fill)
+  if glass.ready then
+    if fill then
+      glass.rectRound(l, b, r, t, glass.elementCorner * 0.5, 1, 1, 1, 1, fill)
+    else
+      glass.highlight(l, b, r, t, glass.elementCorner * 0.5, GLASS.hoverOpacity, GLASS.white)
+    end
+    return
+  end
+
+  local c = fill or { 1, 1, 1, 0.13 }
+  gl.Color(c[1], c[2], c[3], c[4])
+  gl.Rect(l, b, r, t)
+end
+
 --------------------------------------------------------------------------------
 -- Windows: main + load popup
 --------------------------------------------------------------------------------
@@ -262,27 +271,23 @@ local MAIN_WIDTH       = 360
 local MAIN_PADDING     = 10   -- padding around elements
 local BTN_W, BTN_H     = 80, 24
 
--- Saved layouts offered straight on the main window, so the ones in use do not
--- need the load popup opened for them.
+-- One row height for both lists, and how many rows the popup shows at once.
+local ROW_H            = 18
+local LIST_MAX_VISIBLE = 18
+
+-- The snap row, and the saved-layout rows the main window offers under it.
+local SNAP_Y           = MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10
 local MAIN_LIST_ROWS   = 3
-local MAIN_LIST_ROW_H  = 18
-local MAIN_LIST_H      = 6 + MAIN_LIST_ROWS * MAIN_LIST_ROW_H
+local MAIN_LIST_H      = 6 + MAIN_LIST_ROWS * ROW_H
 -- Bottom of the list box, measured up from mainY (drawing is bottom-up).
-local MAIN_LIST_Y      = MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10 + 20 + 6
+local MAIN_LIST_Y      = SNAP_Y + 20 + 6
+
+local DIALOG_W, DIALOG_H = 420, 110
 
 -- One place for the window height: the drawing, every hit test and the drag
 -- math all read it, so the list can be resized without them drifting apart.
 local function MainWindowHeight()
   return MAIN_LIST_Y + MAIN_LIST_H + 5 + MAIN_PADDING * 2
-end
-
--- A saved-layout row on the main window. Shared by the drawing and the hit test
--- so the two cannot disagree about where a row sits.
-local function MainListRowRect(i)
-  local l = mainX + 10
-  local r = mainX + MAIN_WIDTH - 10
-  local b = mainY + MAIN_LIST_Y + 3 + (i - 1) * MAIN_LIST_ROW_H
-  return l, b, r, b + MAIN_LIST_ROW_H
 end
 
 -- Load popup (draggable); positioned on screen by Initialize/ViewResize
@@ -294,6 +299,7 @@ local loadOrigX, loadOrigY           = 0, 0
 local LOAD_TITLE_H     = 24
 local LOAD_WIDTH       = 520
 local LOAD_HEIGHT      = 400
+local LOAD_LIST_H      = LOAD_HEIGHT - LOAD_TITLE_H - 56
 
 --------------------------------------------------------------------------------
 -- Coordinate helpers
@@ -656,26 +662,15 @@ end
 local function ApplySearchFilter()
   -- Reset scroll when filter changes
   listScrollOffset = 0
-  
-  if searchText == "" then
-    filteredLayouts = savedLayouts
-    return
-  end
-  local query = searchText:lower()
+
+  local query = Search.query(searchBox and searchBox:getText() or "")
   local out = {}
   for _, item in ipairs(savedLayouts) do
-    local n = (item.name or ""):lower()
-    local hit = n:find(query, 1, true)
-    if not hit and item.tags then
-      for _, t in ipairs(item.tags) do
-        if t:lower():find(query, 1, true) then
-          hit = true
-          break
-        end
-      end
-    end
-    if hit then
-      out[#out+1] = item
+    -- Search.matches wants the haystack already normalised; names are plain here,
+    -- so a name and its tags can simply be joined.
+    local haystack = Search.normalize((item.name or "") .. " " .. table.concat(item.tags or {}, " "))
+    if Search.matches(query, haystack) then
+      out[#out + 1] = item
     end
   end
   filteredLayouts = out
@@ -821,114 +816,8 @@ end
 -- Mouse handling
 --------------------------------------------------------------------------------
 
--- Save dialog: draw + hit-test
-local function DrawSaveDialog()
-  if not showSaveDialog then
-    SetGlassBlur("layoutplannerplus_save", nil)
-    return
-  end
-
-  local vsx, vsy = gl.GetViewSizes()
-  local dialogWidth = 420
-  local dialogHeight = 110
-  local dialogX = (vsx - dialogWidth) / 2
-  local dialogY = (vsy - dialogHeight) / 2
-
-  -- Background: glass panel over a blurred world
-  SetGlassBlur("layoutplannerplus_save", dialogX, dialogY, dialogX + dialogWidth, dialogY + dialogHeight)
-  GlassPanel(dialogX, dialogY, dialogX + dialogWidth, dialogY + dialogHeight)
-
-  -- Text
-  gl.Color(1, 1, 1, 1)
-  gl.Text("Save layout as:", dialogX + 10, dialogY + 78, 14, "")
-
-  -- Input box
-  GlassInset(dialogX + 10, dialogY + 48, dialogX + dialogWidth - 10, dialogY + 68, 0.45)
-
-  gl.Color(1, 1, 1, 1)
-  local displayText = saveNameText
-  if #displayText == 0 then
-    displayText = "e.g. corner001 or wall02"
-    gl.Color(0.5, 0.5, 0.5, 1.0)
-  end
-  local textX = dialogX + 14
-  local textY = dialogY + 52
-  gl.Text(displayText, textX, textY, 13, "")
-  -- Blinking caret to indicate active text input
-  if IsCaretVisible() then
-    local w = gl.GetTextWidth(displayText) * 13
-    gl.Color(1, 1, 1, 1)
-    gl.Text("|", textX + w + 2, textY, 13, "")
-  end
-
-  -- Buttons
-  local mx, my = Spring.GetMouseState()
-  local btnY = dialogY + 14
-  local btnWidth = 80
-  local btnHeight = 24
-
-  -- OK button
-  local okX1, okX2 = dialogX + 10, dialogX + 10 + btnWidth
-  GlassButton(okX1, btnY, okX2, btnY + btnHeight, GLASS.confirmFill,
-    InRect(mx, my, okX1, btnY, okX2, btnY + btnHeight))
-  gl.Color(1, 1, 1, 1)
-  gl.Text("OK", dialogX + 10 + 26, btnY + 6, 13, "")
-
-  -- Cancel button
-  local cancelX1, cancelX2 = dialogX + dialogWidth - 10 - btnWidth, dialogX + dialogWidth - 10
-  GlassButton(cancelX1, btnY, cancelX2, btnY + btnHeight, GLASS.dangerFill,
-    InRect(mx, my, cancelX1, btnY, cancelX2, btnY + btnHeight))
-  gl.Color(1, 1, 1, 1)
-  gl.Text("Cancel", dialogX + dialogWidth - 10 - 48, btnY + 6, 13, "")
-end
-
-local function HitTestSaveDialog(mx, my)
-  if not showSaveDialog then return nil end
-
-  local vsx, vsy = gl.GetViewSizes()
-  local dialogWidth = 420
-  local dialogHeight = 110
-  local dialogX = (vsx - dialogWidth) / 2
-  local dialogY = (vsy - dialogHeight) / 2
-
-  local btnY = dialogY + 14
-  local btnWidth = 80
-  local btnHeight = 24
-
-  -- OK button
-  if mx >= dialogX + 10 and mx <= dialogX + 10 + btnWidth and
-     my >= btnY and my <= btnY + btnHeight then
-    return "ok"
-  end
-
-  -- Cancel button
-  if mx >= dialogX + dialogWidth - 10 - btnWidth and mx <= dialogX + dialogWidth - 10 and
-     my >= btnY and my <= btnY + btnHeight then
-    return "cancel"
-  end
-
-  return nil
-end
-
-local function HitInMain(mx, my)
-  return mx >= mainX and mx <= mainX + MAIN_WIDTH and
-         my >= mainY and my <= mainY + MainWindowHeight()
-end
-
-local function HitInLoadPopup(mx, my)
-  if not loadPopupVisible then return false end
-  return mx >= loadX and mx <= loadX + LOAD_WIDTH and
-         my >= loadY and my <= loadY + LOAD_HEIGHT
-end
-
--- Simple hit regions inside main window
-local function MainButtonHit(mx, my, bx, by, bw, bh)
-  local lx, ly = mx - mainX, my - mainY
-  return lx >= bx and lx <= bx + bw and ly >= by and ly <= by + bh
-end
-
--- Button layout in main window
-local function MainButtonsLayout()
+-- Where the main window's buttons sit, as offsets from its bottom-left corner.
+local function MainButtonOffsets()
   local y = MAIN_TITLE_H + 10
   return {
     draw   = { x = 10,            y = y },
@@ -939,321 +828,294 @@ local function MainButtonsLayout()
   }
 end
 
-local function LoadPopupRegions()
-  -- relative coords inside popup
-  -- Note: loadY is the TOP of the window, Y increases downward
-  -- Title bar is at the TOP (height = LOAD_TITLE_H)
+local SNAP_LABELS = { "Off", "Intersect", "Mid", "Third" }
+local SNAP_STEPS  = { "none", "3 BU (48 IGU)", "1.5 BU (24 IGU)", "1 BU (16 IGU)" }
+
+--------------------------------------------------------------------------------
+-- UI geometry
+--
+-- One description of where every control sits, in absolute bottom-up
+-- coordinates, rebuilt each frame and read by both the drawing and the hit
+-- tests. The two used to compute the same rectangles independently and in
+-- different coordinate spaces, which is how a control's hit area drifts away
+-- from the control itself.
+--------------------------------------------------------------------------------
+
+local ui = {}
+
+local function RectHit(r, x, y)
+  return r ~= nil and x >= r[1] and x <= r[3] and y >= r[2] and y <= r[4]
+end
+
+-- The grab margin around a window for moving it.
+local function NearWindowEdge(win, x, y)
+  local m = 5
+  return x <= win[1] + m or x >= win[3] - m or y <= win[2] + m or y >= win[4] - m
+end
+
+local function BuildMainLayout()
+  local top = mainY + MainWindowHeight()
+  local L   = { buttons = {}, chips = {}, rows = {} }
+
+  L.win      = { mainX, mainY, mainX + MAIN_WIDTH, top }
+  L.titleBar = { mainX, top - MAIN_TITLE_H, mainX + MAIN_WIDTH, top }
+  L.exit     = { mainX + MAIN_WIDTH - 24, top - MAIN_TITLE_H + 2,
+                 mainX + MAIN_WIDTH - 4,  top - MAIN_TITLE_H + 22 }
+
+  for id, off in pairs(MainButtonOffsets()) do
+    local l, b = mainX + off.x, mainY + off.y
+    L.buttons[id] = { l, b, l + BTN_W, b + BTN_H }
+  end
+
+  L.snapRow = { mainX + 10, mainY + SNAP_Y, mainX + MAIN_WIDTH - 10, mainY + SNAP_Y + 20 }
+  for i = 0, 3 do
+    local l = mainX + 80 + i * 64
+    L.chips[i] = { l, mainY + SNAP_Y + 2, l + 60, mainY + SNAP_Y + 18 }
+  end
+
+  L.list = { mainX + 10, mainY + MAIN_LIST_Y,
+             mainX + MAIN_WIDTH - 10, mainY + MAIN_LIST_Y + MAIN_LIST_H }
+  for i = 1, MAIN_LIST_ROWS do
+    local b = L.list[2] + 3 + (i - 1) * ROW_H
+    L.rows[i] = { L.list[1], b, L.list[3], b + ROW_H }
+  end
+
+  return L
+end
+
+-- Offsets inside the popup are written the way its layout reads: from the
+-- window's top-left corner, downwards. rel() makes one absolute and bottom-up.
+local function BuildPopupLayout(vsy)
+  local function rel(x, y, w, h)
+    local top = vsy - (loadY + y)
+    return { loadX + x, top - h, loadX + x + w, top }
+  end
+
+  local L = { rows = {} }
+  L.win      = { loadX, vsy - (loadY + LOAD_HEIGHT), loadX + LOAD_WIDTH, vsy - loadY }
+  L.titleBar = rel(0, 0, LOAD_WIDTH, LOAD_TITLE_H)
+  L.search   = rel(10,  LOAD_TITLE_H + 8,  200, 20)
+  L.list     = rel(10,  LOAD_TITLE_H + 36, 200, LOAD_LIST_H)
+  L.thumbBox = rel(220, LOAD_TITLE_H + 36, 280, 290)
+  L.btnLoad  = rel(220, LOAD_TITLE_H + 6, 60, 24)
+  L.btnDel   = rel(285, LOAD_TITLE_H + 6, 60, 24)
+  L.btnDup   = rel(350, LOAD_TITLE_H + 6, 60, 24)
+  L.btnClose = rel(LOAD_WIDTH - 70, LOAD_TITLE_H + 6, 60, 20)
+
+  local total = #filteredLayouts
+  L.maxScroll = math.max(0, total - LIST_MAX_VISIBLE)
+  if listScrollOffset > L.maxScroll then listScrollOffset = L.maxScroll end
+  if listScrollOffset < 0 then listScrollOffset = 0 end
+
+  -- The scrollbar's strip, and the thumb's rect taken from FlowUI's own
+  -- geometry, so where the bar is drawn and where it can be grabbed are the
+  -- same rectangle by construction.
+  local barX2 = L.list[3] - 2
+  L.bar           = { barX2 - 8, L.list[2] + 2, barX2, L.list[4] - 2 }
+  L.scrollContent = total * ROW_H
+  L.scrollPos     = listScrollOffset * ROW_H
+  L.barThumb      = nil
+  if glass.ready and glass.scrollerGeometry and L.bar[4] > L.bar[2] then
+    local top, thumbH = glass.scrollerGeometry(L.bar[1], L.bar[2], L.bar[3], L.bar[4],
+                                               L.scrollContent, L.scrollPos)
+    if top then
+      L.barThumb = { L.bar[1], top - thumbH, L.bar[3], top }
+    end
+  end
+
+  local rowRight = L.list[3] - 2 - (L.barThumb and 10 or 0)
+  local shown    = math.min(LIST_MAX_VISIBLE, total - listScrollOffset)
+  for i = 1, shown do
+    local top = L.list[4] - 2 - (i - 1) * ROW_H
+    L.rows[i] = { L.list[1] + 2, top - ROW_H, rowRight, top }
+  end
+
+  return L
+end
+
+local function BuildDialogLayout(vsx, vsy)
+  local x, y = (vsx - DIALOG_W) / 2, (vsy - DIALOG_H) / 2
   return {
-    -- Search just under the title bar
-    searchBox = { x = 10, y = LOAD_TITLE_H + 8, w = 200, h = 20 },
-    -- List box starts a bit under the search bar
-    listBox   = { x = 10, y = LOAD_TITLE_H + 36, w = 200, h = LOAD_HEIGHT - LOAD_TITLE_H - 56 },
-    -- Larger thumbnail, starts below the buttons, aligned with list vertically
-    thumbBox  = { x = 220, y = LOAD_TITLE_H + 36, w = 280, h = 290 },
-    -- Buttons sit just under the title bar, above search/list
-    btnLoad   = { x = 220, y = LOAD_TITLE_H + 6, w = 60,  h = 24 },
-    btnDel    = { x = 285, y = LOAD_TITLE_H + 6, w = 60,  h = 24 },
-    btnDup    = { x = 350, y = LOAD_TITLE_H + 6, w = 60,  h = 24 },
-    btnClose  = { x = LOAD_WIDTH - 70, y = LOAD_TITLE_H + 6, w = 60, h = 20 }
+    win    = { x, y, x + DIALOG_W, y + DIALOG_H },
+    field  = { x + 10, y + 48, x + DIALOG_W - 10, y + 68 },
+    ok     = { x + 10, y + 14, x + 10 + 80, y + 38 },
+    cancel = { x + DIALOG_W - 90, y + 14, x + DIALOG_W - 10, y + 38 },
   }
 end
 
+local function RefreshUI()
+  local vsx, vsy = gl.GetViewSizes()
+  ui.main   = BuildMainLayout()
+  ui.popup  = loadPopupVisible and BuildPopupLayout(vsy) or nil
+  ui.dialog = showSaveDialog and BuildDialogLayout(vsx, vsy) or nil
+end
+
+-- The name field's own drawing is the editbox's; only the panel and the two
+-- buttons are ours.
+local function DrawSaveDialog()
+  if not showSaveDialog then
+    SetGlassBlur("layoutplannerplus_save", nil)
+    return
+  end
+
+  local D = ui.dialog
+  SetGlassBlur("layoutplannerplus_save", D.win[1], D.win[2], D.win[3], D.win[4])
+  GlassPanel(D.win[1], D.win[2], D.win[3], D.win[4])
+
+  gl.Color(1, 1, 1, 1)
+  gl.Text("Save layout as:", D.win[1] + 10, D.win[2] + 78, 14, "")
+
+  local mx, my = Spring.GetMouseState()
+  nameBox:setRect(D.field[1], D.field[2], D.field[3], D.field[4], 13)
+  nameBox:draw()
+
+  local function button(r, label, fill)
+    GlassButton(r[1], r[2], r[3], r[4], fill, RectHit(r, mx, my))
+    gl.Color(1, 1, 1, 1)
+    local tw = gl.GetTextWidth(label) * 13
+    gl.Text(label, r[1] + ((r[3] - r[1]) - tw) / 2, r[2] + 6, 13, "")
+  end
+  button(D.ok,     "OK",     GLASS.confirmFill)
+  button(D.cancel, "Cancel", GLASS.dangerFill)
+end
+
 function widget:MousePress(mx, my, button)
-  -- Save dialog clicks
-  if showSaveDialog then
-    local hit = HitTestSaveDialog(mx, my)
-    if hit == "ok" then
-      if saveNameText ~= "" then
-        SaveLayoutAs(saveNameText, {})
-        RefreshSavedLayouts()
-        ApplySearchFilter()
+  RefreshUI()
+
+  -- The save dialog owns the screen while it is up.
+  local D = ui.dialog
+  if D then
+    if button == 1 then
+      if RectHit(D.ok, mx, my) then
+        local name = nameBox:getText():gsub("^%s*(.-)%s*$", "%1")
+        if name ~= "" then
+          SaveLayoutAs(name, {})
+          RefreshSavedLayouts()
+          ApplySearchFilter()
+        end
+        showSaveDialog = false
+        nameBox:blur()
+      elseif RectHit(D.cancel, mx, my) then
+        showSaveDialog = false
+        nameBox:blur()
       end
-      showSaveDialog = false
-      saveNameText = ""
-      return true
-    elseif hit == "cancel" then
-      showSaveDialog = false
-      saveNameText = ""
+    end
+    return true
+  end
+
+  local P = ui.popup
+  if P then
+    if button ~= 1 then
       return true
     end
-    return true -- consume clicks while dialog open
-  end
-  -- Handle load popup first
-  if loadPopupVisible then
-    local relX = mx - loadX
-    -- Mouse Y is in bottom-up coordinates, convert loadY (top-down) to bottom-up for comparison
-    local vsx, vsy = gl.GetViewSizes()
-    local loadY_bu = vsy - (loadY + LOAD_HEIGHT)  -- Bottom of window in bottom-up
-    local relY_bu = my - loadY_bu  -- Mouse Y relative to bottom of window (bottom-up)
-    local r = LoadPopupRegions()
 
-    -- drag popup by title bar: full title height
-    local titleBarTop_bu    = vsy - loadY              -- Window top in bottom-up
-    local titleBarBottom_bu = vsy - (loadY + LOAD_TITLE_H)
-    if button == 1 and relX >= 0 and relX <= LOAD_WIDTH and
-       my >= titleBarBottom_bu and my <= titleBarTop_bu then
+    -- drag by the title band
+    if RectHit(P.titleBar, mx, my) then
       loadDragging = true
-      -- Store starting mouse position (bottom-up) and original window position (top-down)
       loadDragStartMX, loadDragStartMY = mx, my
       loadOrigX, loadOrigY             = loadX, loadY
       return true
     end
 
-    -- close button (convert button rect to bottom-up, match drawBtn exactly)
-    if button == 1 then
-      local btnCloseTopY    = loadY + r.btnClose.y              -- top in top-down
-      local btnCloseBottomY = btnCloseTopY + r.btnClose.h       -- bottom in top-down
-      local btnX1 = loadX + r.btnClose.x
-      local btnX2 = btnX1 + r.btnClose.w
-      local btnY1 = vsy - btnCloseBottomY   -- bottom in bottom-up
-      local btnY2 = vsy - btnCloseTopY      -- top in bottom-up
-      if mx >= btnX1 and mx <= btnX2 and my >= btnY1 and my <= btnY2 then
-        -- Just close the popup and restore state; do NOT start/keep a preview
+    -- the field takes clicks before anything behind it does
+    if searchBox:mousePress(mx, my) then
+      return true
+    end
+
+    if RectHit(P.btnClose, mx, my) then
+      -- just close; nothing follows the cursor and no preview is kept
+      loadPopupVisible = false
+      drawingMode      = wasDrawingBeforeLoad
+      selectedIndex    = nil
+      selectedData     = nil
+      layoutRotation   = 0
+      layoutInverted   = false
+      searchBox:blur()
+      return true
+    end
+
+    if RectHit(P.btnLoad, mx, my) then
+      -- the highlighted layout is what Load carries over; the popup closes and
+      -- the layout follows the cursor
+      if selectedIndex and filteredLayouts[selectedIndex] then
         loadPopupVisible = false
-        drawingMode      = wasDrawingBeforeLoad
-        -- Cancel any selected layout & transforms so nothing follows the cursor
-        selectedIndex    = nil
-        selectedData     = nil
-        layoutRotation   = 0
-        layoutInverted   = false
-        return true
       end
+      return true
     end
 
-    -- buttons Load/Delete/Duplicate (convert button Y to bottom-up)
-    -- Check buttons FIRST so they get priority over list box
-    if button == 1 then
-      -- Match rendering calculation exactly
-      local btnLoadTopY = loadY + r.btnLoad.y  -- Top in top-down
-      local btnLoadBottomY = btnLoadTopY + r.btnLoad.h  -- Bottom in top-down
-      local btnLoadBottomY_bu = vsy - btnLoadBottomY  -- Bottom in bottom-up
-      local btnLoadTopY_bu = vsy - btnLoadTopY  -- Top in bottom-up
-      if relX >= r.btnLoad.x and relX <= r.btnLoad.x + r.btnLoad.w and
-         my >= btnLoadBottomY_bu and my <= btnLoadTopY_bu then
-        -- select layout; popup closes, preview will be visible via selectedData
-        if selectedIndex and filteredLayouts[selectedIndex] then
-          loadPopupVisible = false
-          -- keep drawing off until placement completes
+    if RectHit(P.btnDel, mx, my) then
+      if selectedIndex and filteredLayouts[selectedIndex] then
+        local item = filteredLayouts[selectedIndex]
+        if item.filename then
+          os.remove(item.filename)
         end
-        return true
+        RefreshSavedLayouts()
+        ApplySearchFilter()
+        selectedIndex  = nil
+        selectedData   = nil
+        layoutRotation = 0
+        layoutInverted = false
       end
-      -- Match rendering calculation exactly
-      local btnDelTopY = loadY + r.btnDel.y  -- Top in top-down
-      local btnDelBottomY = btnDelTopY + r.btnDel.h  -- Bottom in top-down
-      local btnDelBottomY_bu = vsy - btnDelBottomY  -- Bottom in bottom-up
-      local btnDelTopY_bu = vsy - btnDelTopY  -- Top in bottom-up
-      if relX >= r.btnDel.x and relX <= r.btnDel.x + r.btnDel.w and
-         my >= btnDelBottomY_bu and my <= btnDelTopY_bu then
-        if selectedIndex and filteredLayouts[selectedIndex] then
-          local item = filteredLayouts[selectedIndex]
-          if item.filename then
-            os.remove(item.filename)
-          end
-          RefreshSavedLayouts()
-          ApplySearchFilter()
-          selectedIndex = nil
-          selectedData  = nil
-          layoutRotation = 0
-          layoutInverted = false
-        end
-        return true
-      end
-      -- Match rendering calculation exactly
-      local btnDupTopY = loadY + r.btnDup.y  -- Top in top-down
-      local btnDupBottomY = btnDupTopY + r.btnDup.h  -- Bottom in top-down
-      local btnDupBottomY_bu = vsy - btnDupBottomY  -- Bottom in bottom-up
-      local btnDupTopY_bu = vsy - btnDupTopY  -- Top in bottom-up
-      if relX >= r.btnDup.x and relX <= r.btnDup.x + r.btnDup.w and
-         my >= btnDupBottomY_bu and my <= btnDupTopY_bu then
-        if selectedIndex and filteredLayouts[selectedIndex] then
-          local item = filteredLayouts[selectedIndex]
-          if item and item.filename then
-            local f = io.open(item.filename, "r")
-            if f then
-              local text = f:read("*all")
-              f:close()
-              -- find new filename
-              local base = item.filename:gsub("%.json$", "")
-              local n = 1
-              local newName
-              while true do
-                newName = base .. "_copy" .. n .. ".json"
-                local t = io.open(newName, "r")
-                if not t then break end
-                t:close()
-                n = n + 1
-              end
-              local nf = io.open(newName, "w")
-              if nf then
-                nf:write(text)
-                nf:close()
-                RefreshSavedLayouts()
-                ApplySearchFilter()
-              end
+      return true
+    end
+
+    if RectHit(P.btnDup, mx, my) then
+      if selectedIndex and filteredLayouts[selectedIndex] then
+        local item = filteredLayouts[selectedIndex]
+        if item and item.filename then
+          local f = io.open(item.filename, "r")
+          if f then
+            local text = f:read("*all")
+            f:close()
+            local base = item.filename:gsub("%.json$", "")
+            local n = 1
+            local newName
+            while true do
+              newName = base .. "_copy" .. n .. ".json"
+              local t = io.open(newName, "r")
+              if not t then break end
+              t:close()
+              n = n + 1
             end
-          end
-        end
-        return true
-      end
-    end
-
-    -- search box focus (we'll just always treat keyboard as updating search when popup visible)
-    -- list click: mirror DrawScreen item rectangles exactly (bottom-up coords)
-    local listBoxTopY = loadY + r.listBox.y  -- Top in top-down
-    local listBoxBottomY = listBoxTopY + r.listBox.h
-    local listBoxBottomY_bu = vsy - listBoxBottomY  -- Bottom in bottom-up
-    local listBoxTopY_bu = vsy - listBoxTopY        -- Top in bottom-up
-    if button == 1 and
-       relX >= r.listBox.x and relX <= r.listBox.x + r.listBox.w and
-       my >= listBoxBottomY_bu and my <= listBoxTopY_bu then
-      local totalItems = #filteredLayouts
-      if totalItems > 0 then
-        local maxVisible  = 18
-        local hasScrollbar = totalItems > maxVisible
-        local scrollBarW   = 8
-        local scrollBarX   = r.listBox.x + r.listBox.w - scrollBarW - 2
-        if hasScrollbar and relX >= scrollBarX then
-          -- Clicked on scrollbar - handled separately
-          return true
-        end
-
-        -- Clamp scroll offset like in DrawScreen
-        local maxScroll = math.max(0, totalItems - maxVisible)
-        if totalItems <= maxVisible then
-          listScrollOffset = 0
-        else
-          if listScrollOffset > maxScroll then listScrollOffset = maxScroll end
-          if listScrollOffset < 0 then listScrollOffset = 0 end
-        end
-
-        local rowH = 18
-        local itemsToShow = math.min(maxVisible, totalItems - listScrollOffset)
-
-        -- Iterate rows and use the exact same rect math as DrawScreen
-        for row = 0, itemsToShow - 1 do
-          local itemIndex = listScrollOffset + row + 1
-          if itemIndex > totalItems then break end
-
-          local itemTopY    = listBoxTopY + 2 + (row * rowH)
-          local itemBottomY = itemTopY + rowH
-          if itemTopY + rowH > listBoxBottomY then
-            break
-          end
-
-          local rectY1 = vsy - itemBottomY -- bottom in bottom-up
-          local rectY2 = vsy - itemTopY    -- top in bottom-up
-
-          if my >= rectY1 and my <= rectY2 then
-            selectedIndex = itemIndex
-            selectedData  = filteredLayouts[itemIndex].data
-            -- Reset transformation when selecting a new layout
-            layoutRotation = 0
-            layoutInverted = false
-            break
+            local nf = io.open(newName, "w")
+            if nf then
+              nf:write(text)
+              nf:close()
+              RefreshSavedLayouts()
+              ApplySearchFilter()
+            end
           end
         end
       end
       return true
+    end
+
+    -- the scrollbar's whole strip takes the drag, so a near miss still grabs it
+    if P.barThumb and RectHit(P.bar, mx, my) then
+      scrollDragging = true
+      return true
+    end
+
+    for i, r in ipairs(P.rows) do
+      if RectHit(r, mx, my) then
+        selectedIndex  = listScrollOffset + i
+        local item     = filteredLayouts[selectedIndex]
+        selectedData   = item and item.data or nil
+        layoutRotation = 0
+        layoutInverted = false
+        return true
+      end
     end
 
     -- while popup is open, block clicks from reaching world/drawing logic
     return true
   end
 
-  -- main window buttons
-  local btns = MainButtonsLayout()
-  if button == 1 and HitInMain(mx, my) then
-    if MainButtonHit(mx, my, btns.draw.x, btns.draw.y, BTN_W, BTN_H) then
-      -- While load popup is open or a layout is attached to the mouse,
-      -- do NOT allow toggling draw mode.
-      if loadPopupVisible or selectedData then
-        Spring.Echo("[LayoutPlannerPlus] Finish or cancel layout placement before toggling Draw")
-        return true
-      end
-      drawingMode = not drawingMode
-      Spring.Echo("[LayoutPlannerPlus] Drawing: " .. (drawingMode and "ON" or "OFF"))
-      return true
-    end
-    if MainButtonHit(mx, my, btns.clear.x, btns.clear.y, BTN_W, BTN_H) then
-      ClearCurrentLayout()
-      return true
-    end
-    if MainButtonHit(mx, my, btns.save.x, btns.save.y, BTN_W, BTN_H) then
-      -- open save name dialog
-      showSaveDialog = true
-      saveNameText = ""
-      return true
-    end
-    if MainButtonHit(mx, my, btns.load.x, btns.load.y, BTN_W, BTN_H) then
-      if #savedLayouts > 0 then
-        -- remember drawing state, and turn drawing off while loading
-        wasDrawingBeforeLoad = drawingMode
-        drawingMode = false
-        -- open load popup positioned over the main window (same top‑left)
-        loadX, loadY       = mainX, mainY
-        loadPopupVisible   = true
-        listScrollOffset = 0  -- Reset scroll when opening popup
-        RefreshSavedLayouts()
-        ApplySearchFilter()
-      else
-        Spring.Echo("[LayoutPlannerPlus] No saved layouts found")
-      end
-      return true
-    end
-    if MainButtonHit(mx, my, btns.render.x, btns.render.y, BTN_W, BTN_H) then
-      -- Render current layout as game map markers using queue (gradual rendering)
-      Spring.Echo("[LayoutPlannerPlus] Render button clicked - queuing lines for rendering")
-      CollectAndDraw()
-      Spring.Echo("[LayoutPlannerPlus] Queued " .. #drawLineQueue .. " lines for gradual rendering")
-      renderTimer = 0
-      return true
-    end
-  end
-
-  -- snap mode buttons (inside main)
-  if button == 1 and HitInMain(mx, my) then
-    local lx, ly = mx - mainX, my - mainY
-    local snapY = MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10
-    if ly >= snapY + 2 and ly <= snapY + 18 then
-      local x = 80
-      for i = 0, 3 do
-        local w = 60
-        if lx >= x and lx <= x + w then
-          lineSnapMode = i
-          local labels = {"Off", "Intersect", "Mid", "Third"}
-          local steps = {"none", "3 BU (48 IGU)", "1.5 BU (24 IGU)", "1 BU (16 IGU)"}
-          Spring.Echo("[LayoutPlannerPlus] Line snap: " .. labels[i+1] .. " (mode " .. i .. ", step: " .. steps[i+1] .. ")")
-          return true
-        end
-        x = x + w + 4
-      end
-    end
-  end
-
-  -- saved-layout rows on the main window: arm the layout for placement, the
-  -- same state the load popup leaves behind. Rendering stays a separate step.
-  if button == 1 and HitInMain(mx, my) then
-    for i, item in ipairs(mainListLayouts) do
-      local l, b, r, t = MainListRowRect(i)
-      if InRect(mx, my, l, b, r, t) then
-        selectedIndex  = nil
-        selectedData   = item.data
-        layoutRotation = 0
-        layoutInverted = false
-        Spring.Echo("[LayoutPlannerPlus] Activated layout: " .. tostring(item.name or "?"))
-        return true
-      end
-    end
-  end
-
-  -- Exit button click (in title bar)
-  if button == 1 and HitInMain(mx, my) then
-    local lx, ly = mx - mainX, my - mainY
-    local h        = MainWindowHeight()
-    local exitBtnX = MAIN_WIDTH - 24
-    local exitBtnY = h - MAIN_TITLE_H + 2
-    if lx >= exitBtnX and lx <= exitBtnX + 20 and
-       ly >= exitBtnY and ly <= exitBtnY + 20 then
+  -- main window. A click that lands on the panel belongs to the panel, so it
+  -- stops here rather than falling through to the world behind it.
+  local M = ui.main
+  if button == 1 and RectHit(M.win, mx, my) then
+    if RectHit(M.exit, mx, my) then
       -- Disable widget (user can re-enable via F11 menu)
       if not exitButtonClicked then
         exitButtonClicked = true
@@ -1264,26 +1126,86 @@ function widget:MousePress(mx, my, button)
       end
       return true
     end
-  end
 
-  -- main window drag (only title bar or empty edges, after button handling)
-  if button == 1 and HitInMain(mx, my) then
-    local lx, ly = mx - mainX, my - mainY
-    local h        = MainWindowHeight()
-    local onTitleBar = ly >= h - MAIN_TITLE_H and ly <= h
-    local edgeMargin = 5
-    local onEdge = (lx <= edgeMargin or lx >= MAIN_WIDTH - edgeMargin or
-                    ly <= edgeMargin or ly >= h - edgeMargin)
-    -- Don't drag if clicking exit button
-    local exitBtnX = MAIN_WIDTH - 24
-    local exitBtnY = h - MAIN_TITLE_H + 2
-    local onExitBtn = (lx >= exitBtnX and lx <= exitBtnX + 20 and
-                       ly >= exitBtnY and ly <= exitBtnY + 20)
-    if (onTitleBar or onEdge) and not onExitBtn then
-      mainDragging = true
-      mainDragDX, mainDragDY = mx - mainX, my - mainY
+    if RectHit(M.buttons.draw, mx, my) then
+      -- While a layout is attached to the mouse, do NOT allow toggling draw mode.
+      if selectedData then
+        Spring.Echo("[LayoutPlannerPlus] Finish or cancel layout placement before toggling Draw")
+        return true
+      end
+      drawingMode = not drawingMode
+      Spring.Echo("[LayoutPlannerPlus] Drawing: " .. (drawingMode and "ON" or "OFF"))
       return true
     end
+
+    if RectHit(M.buttons.clear, mx, my) then
+      ClearCurrentLayout()
+      return true
+    end
+
+    if RectHit(M.buttons.save, mx, my) then
+      showSaveDialog = true
+      nameBox:setText("")
+      nameBox:focus()
+      return true
+    end
+
+    if RectHit(M.buttons.load, mx, my) then
+      if #savedLayouts > 0 then
+        -- remember drawing state, and turn drawing off while loading
+        wasDrawingBeforeLoad = drawingMode
+        drawingMode          = false
+        -- open the popup over the main window (same origin)
+        loadX, loadY         = mainX, mainY
+        loadPopupVisible     = true
+        listScrollOffset     = 0
+        searchBox:setText("")
+        searchBox:blur()
+        RefreshSavedLayouts()
+        ApplySearchFilter()
+      else
+        Spring.Echo("[LayoutPlannerPlus] No saved layouts found")
+      end
+      return true
+    end
+
+    if RectHit(M.buttons.render, mx, my) then
+      Spring.Echo("[LayoutPlannerPlus] Render button clicked - queuing lines for rendering")
+      CollectAndDraw()
+      Spring.Echo("[LayoutPlannerPlus] Queued " .. #drawLineQueue .. " lines for gradual rendering")
+      renderTimer = 0
+      return true
+    end
+
+    for i = 0, 3 do
+      if RectHit(M.chips[i], mx, my) then
+        lineSnapMode = i
+        Spring.Echo("[LayoutPlannerPlus] Line snap: " .. SNAP_LABELS[i+1] ..
+                    " (mode " .. i .. ", step: " .. SNAP_STEPS[i+1] .. ")")
+        return true
+      end
+    end
+
+    -- saved-layout rows: arm the layout for placement, the same state the load
+    -- popup leaves behind. Rendering stays a separate step.
+    for i, item in ipairs(mainListLayouts) do
+      local r = M.rows[i]
+      if r and RectHit(r, mx, my) then
+        selectedIndex  = nil
+        selectedData   = item.data
+        layoutRotation = 0
+        layoutInverted = false
+        Spring.Echo("[LayoutPlannerPlus] Activated layout: " .. tostring(item.name or "?"))
+        return true
+      end
+    end
+
+    -- the title band and the window's edges move the window
+    if RectHit(M.titleBar, mx, my) or NearWindowEdge(M.win, mx, my) then
+      mainDragging = true
+      mainDragDX, mainDragDY = mx - mainX, my - mainY
+    end
+    return true
   end
 
   -- placement of selected layout (when Draw: OFF)
@@ -1371,11 +1293,19 @@ function widget:MouseMove(mx, my, dx, dy, button)
   if loadDragging then
     -- Mouse Y is bottom-up, loadY is top-down.
     -- Horizontal movement is the same, vertical must be inverted to feel natural.
-    local dx = mx - loadDragStartMX
-    local dy = my - loadDragStartMY
-    loadX = loadOrigX + dx
-    loadY = loadOrigY - dy
+    local ddx = mx - loadDragStartMX
+    local ddy = my - loadDragStartMY
+    loadX = loadOrigX + ddx
+    loadY = loadOrigY - ddy
     return
+  end
+  if scrollDragging and ui.popup then
+    -- The whole strip scrubs, so the thumb follows the cursor and a drag that
+    -- started near an end still reaches it.
+    local P    = ui.popup
+    local span = math.max(1, P.bar[4] - P.bar[2])
+    local f    = (P.bar[4] - my) / span          -- 0 at the bottom, 1 at the top
+    listScrollOffset = math.max(0, math.min(P.maxScroll, math.floor(f * P.maxScroll + 0.5)))
   end
 end
 
@@ -1387,6 +1317,10 @@ function widget:MouseRelease(mx, my, button)
     end
     if loadDragging then
       loadDragging = false
+      return true
+    end
+    if scrollDragging then
+      scrollDragging = false
       return true
     end
   end
@@ -1451,48 +1385,37 @@ end
 --------------------------------------------------------------------------------
 
 function widget:KeyPress(key, mods, isRepeat)
+  -- While a field has focus it takes the keys; ESC and ENTER are the panel's,
+  -- and everything else (backspace, arrows, word motion, selection) is the
+  -- editbox's own.
   if showSaveDialog then
-    -- handle save name input
-    if key == 8 then -- backspace
-      saveNameText = saveNameText:sub(1, -2)
-      return true
-    elseif key == 27 then -- ESC
+    if key == 27 then
       showSaveDialog = false
-      saveNameText = ""
-      return true
-    elseif key == 13 then -- ENTER
-      if saveNameText ~= "" then
-        SaveLayoutAs(saveNameText, {})
+      nameBox:blur()
+    elseif key == 13 then
+      local name = nameBox:getText():gsub("^%s*(.-)%s*$", "%1")
+      if name ~= "" then
+        SaveLayoutAs(name, {})
         RefreshSavedLayouts()
         ApplySearchFilter()
       end
       showSaveDialog = false
-      saveNameText = ""
-      return true
-    elseif key >= 32 and key <= 126 then
-      saveNameText = saveNameText .. string.char(key)
-      return true
+      nameBox:blur()
+    else
+      nameBox:keyPress(key)
     end
     return true
   end
 
   if loadPopupVisible then
-    -- ESC closes load popup and restores drawing state
-    if key == 27 then -- ESC
+    if key == 27 then -- ESC closes the popup and restores drawing state
       loadPopupVisible = false
       drawingMode = wasDrawingBeforeLoad
+      searchBox:blur()
       return true
     end
-    -- simple search input: letters/backspace
-    if key == 8 then -- backspace
-      searchText = searchText:sub(1, -2)
-      ApplySearchFilter()
-      return true
-    elseif key >= 32 and key <= 126 then
-      searchText = searchText .. string.char(key)
-      ApplySearchFilter()
-      return true
-    end
+    searchBox:keyPress(key)
+    return true
   end
 
   -- ESC while a layout is preview-following the mouse cancels that preview
@@ -1535,19 +1458,30 @@ function widget:KeyPress(key, mods, isRepeat)
   return false
 end
 
-function widget:MouseWheel(up, value)
+-- Typed characters come through here rather than KeyPress: that is what the
+-- editbox expects, and it is where the unicode and the selection live.
+function widget:TextInput(char)
+  if showSaveDialog then
+    return nameBox:textInput(char)
+  end
   if loadPopupVisible then
-    local maxVisible = 18  -- Match the display maxVisible
-    local totalItems = #filteredLayouts
-    local maxScroll = math.max(0, totalItems - maxVisible)
-    if not up then
-      listScrollOffset = math.max(0, listScrollOffset - 1)
-    else
-      listScrollOffset = math.min(maxScroll, listScrollOffset + 1)
-    end
-    return true
+    return searchBox:textInput(char)
   end
   return false
+end
+
+function widget:MouseWheel(up, value)
+  if not loadPopupVisible then
+    return false
+  end
+
+  local maxScroll = math.max(0, #filteredLayouts - LIST_MAX_VISIBLE)
+  if up then
+    listScrollOffset = math.min(maxScroll, listScrollOffset + 1)
+  else
+    listScrollOffset = math.max(0, listScrollOffset - 1)
+  end
+  return true
 end
 
 --------------------------------------------------------------------------------
@@ -1562,107 +1496,71 @@ function widget:DrawScreen()
   if not glass.ready then RefreshGlass() end
   local mx, my = Spring.GetMouseState()
 
-  -- main window
-  local h        = MainWindowHeight()
-  local mainTop  = mainY + h
+  RefreshUI()
+  local M = ui.main
 
-  SetGlassBlur("layoutplannerplus_main", mainX, mainY, mainX + MAIN_WIDTH, mainTop)
-  GlassPanel(mainX, mainY, mainX + MAIN_WIDTH, mainTop)
+  SetGlassBlur("layoutplannerplus_main", M.win[1], M.win[2], M.win[3], M.win[4])
+  GlassPanel(M.win[1], M.win[2], M.win[3], M.win[4])
 
   -- title band
-  GlassInset(mainX + 1, mainTop - MAIN_TITLE_H, mainX + MAIN_WIDTH - 1, mainTop - 1, 0.5)
+  GlassInset(M.titleBar[1] + 1, M.titleBar[2], M.titleBar[3] - 1, M.titleBar[4] - 1, 0.5)
   gl.Color(1, 0.7, 0.2, 1)
-  gl.Text("LayoutPlannerPlus", mainX + 8, mainTop - MAIN_TITLE_H + 4, 14, "")
+  gl.Text("LayoutPlannerPlus", M.titleBar[1] + 8, M.titleBar[2] + 4, 14, "")
 
   -- Exit button in title bar (top-right)
-  local exitBtnX = mainX + MAIN_WIDTH - 24
-  local exitBtnY = mainTop - MAIN_TITLE_H + 2
-  GlassButton(exitBtnX, exitBtnY, exitBtnX + 20, exitBtnY + 20, GLASS.dangerFill,
-    InRect(mx, my, exitBtnX, exitBtnY, exitBtnX + 20, exitBtnY + 20))
+  GlassButton(M.exit[1], M.exit[2], M.exit[3], M.exit[4], GLASS.dangerFill, RectHit(M.exit, mx, my))
   gl.Color(1, 1, 1, 1)
-  gl.Text("×", exitBtnX + 6, exitBtnY + 2, 16, "")
+  gl.Text("×", M.exit[1] + 6, M.exit[2] + 2, 16, "")
 
-  local btns = MainButtonsLayout()
-  -- draw buttons
-  for id, pos in pairs(btns) do
-    local label, fill
-    if id == "draw" then
-      label = drawingMode and "Draw: ON" or "Draw: OFF"
-      fill = drawingMode and GLASS.drawOnFill or GLASS.buttonFill
-    elseif id == "clear" then
-      label = "Clear"
-      fill = GLASS.dangerFill
-    elseif id == "save" then
-      label = "Save"
-      fill = GLASS.confirmFill
-    elseif id == "load" then
-      label = "Load"
-      if #savedLayouts == 0 then
-        fill = GLASS.buttonFill  -- muted while there is nothing to load
-      else
-        fill = GLASS.loadFill
-      end
-    elseif id == "render" then
-      label = "Render"
-      fill = GLASS.renderFill
-    end
-    local l, b, r, t = mainX + pos.x, mainY + pos.y, mainX + pos.x + BTN_W, mainY + pos.y + BTN_H
-    local enabled = (id ~= "load") or (#savedLayouts > 0)
-    GlassButton(l, b, r, t, fill, enabled and InRect(mx, my, l, b, r, t))
+  local looks = {
+    draw   = { drawingMode and "Draw: ON" or "Draw: OFF",
+               drawingMode and GLASS.drawOnFill or GLASS.buttonFill, true },
+    clear  = { "Clear",  GLASS.dangerFill,  true },
+    save   = { "Save",   GLASS.confirmFill, true },
+    load   = { "Load",   #savedLayouts > 0 and GLASS.loadFill or GLASS.buttonFill, #savedLayouts > 0 },
+    render = { "Render", GLASS.renderFill,  true },
+  }
+  for id, r in pairs(M.buttons) do
+    local look = looks[id]
+    GlassButton(r[1], r[2], r[3], r[4], look[2], look[3] and RectHit(r, mx, my))
     gl.Color(1,1,1,1)
-    local tw = gl.GetTextWidth(label) * 12
-    local tx = l + (BTN_W - tw)/2
-    local ty = b + 6
-    gl.Text(label, tx, ty, 12, "")
+    local tw = gl.GetTextWidth(look[1]) * 12
+    gl.Text(look[1], r[1] + ((r[3] - r[1]) - tw)/2, r[2] + 6, 12, "")
   end
 
   -- Line snap mode selector (only control row below main buttons)
-  local snapY = mainY + MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10
-  GlassInset(mainX + 10, snapY, mainX + MAIN_WIDTH - 10, snapY + 20)
+  GlassInset(M.snapRow[1], M.snapRow[2], M.snapRow[3], M.snapRow[4])
   gl.Color(1,1,1,1)
-  gl.Text("Line Snap:", mainX + 12, snapY + 4, 10, "")
-  local snapLabels = {"Off", "Intersect", "Mid", "Third"}
-  local snapX = mainX + 80
+  gl.Text("Line Snap:", M.snapRow[1] + 2, M.snapRow[2] + 4, 10, "")
   for i = 0, 3 do
-    local w = 60
-    local l, b, r, t = snapX, snapY + 2, snapX + w, snapY + 18
+    local r = M.chips[i]
     local fill = (i == lineSnapMode) and GLASS.accentFill or GLASS.buttonFill
-    GlassButton(l, b, r, t, fill, InRect(mx, my, l, b, r, t))
+    GlassButton(r[1], r[2], r[3], r[4], fill, RectHit(r, mx, my))
     gl.Color(1,1,1,1)
-    gl.Text(snapLabels[i+1], l + 4, snapY + 5, 10, "")
-    snapX = snapX + w + 4
+    gl.Text(SNAP_LABELS[i+1], r[1] + 4, r[2] + 3, 10, "")
   end
 
   -- Saved layouts, first three by file name. Picking one arms it for placement
   -- exactly as the load popup does; nothing is drawn to the map here, that is
   -- still the Render button.
-  local listX1 = mainX + 10
-  local listX2 = mainX + MAIN_WIDTH - 10
-  local listY1 = mainY + MAIN_LIST_Y
-  GlassInset(listX1, listY1, listX2, listY1 + MAIN_LIST_H)
+  GlassInset(M.list[1], M.list[2], M.list[3], M.list[4])
 
   if #mainListLayouts == 0 then
     gl.Color(0.55,0.55,0.55,1)
-    gl.Text("No saved layouts", listX1 + 6, listY1 + MAIN_LIST_H/2 - 5, 11, "")
+    gl.Text("No saved layouts", M.list[1] + 6, M.list[2] + MAIN_LIST_H/2 - 5, 11, "")
   else
     for i, item in ipairs(mainListLayouts) do
-      local l, b, r, t = MainListRowRect(i)
-      local active  = selectedData ~= nil and item.data == selectedData
-      local hovered = InRect(mx, my, l, b, r, t)
-
-      if active then
-        if glass.ready then
-          glass.rectRound(l, b, r, t, glass.elementCorner * 0.5, 1, 1, 1, 1, GLASS.selectedFill)
-        else
-          gl.Color(1,1,1,0.13)
-          gl.Rect(l, b, r, t)
+      local r = M.rows[i]
+      if r then
+        if selectedData ~= nil and item.data == selectedData then
+          MarkRow(r[1], r[2], r[3], r[4], GLASS.selectedFill)
+        elseif RectHit(r, mx, my) then
+          MarkRow(r[1], r[2], r[3], r[4])
         end
-      elseif hovered and glass.ready then
-        glass.highlight(l, b, r, t, glass.elementCorner * 0.5, GLASS.hoverOpacity, GLASS.white)
-      end
 
-      gl.Color(1,1,1,1)
-      gl.Text(item.name or "?", l + 4, b + 4, 11, "")
+        gl.Color(1,1,1,1)
+        gl.Text(item.name or "?", r[1] + 4, r[2] + 4, 11, "")
+      end
     end
   end
 
@@ -1678,187 +1576,60 @@ function widget:DrawScreen()
   gl.Text(hintText, mainX + 10, mainY + 10, 11, "")
 
   -- load popup
-  if loadPopupVisible then
-    -- Get viewport size for coordinate conversion (Spring uses bottom-up coordinates)
-    local vsx, vsy = gl.GetViewSizes()
-
-    -- Window background (convert to bottom-up)
-    local winY1 = vsy - (loadY + LOAD_HEIGHT)
-    local winY2 = vsy - loadY
-    SetGlassBlur("layoutplannerplus_load", loadX, winY1, loadX + LOAD_WIDTH, winY2)
-    GlassPanel(loadX, winY1, loadX + LOAD_WIDTH, winY2)
+  local P = ui.popup
+  if P then
+    SetGlassBlur("layoutplannerplus_load", P.win[1], P.win[2], P.win[3], P.win[4])
+    GlassPanel(P.win[1], P.win[2], P.win[3], P.win[4])
 
     -- Title bar (at TOP of window)
-    GlassInset(loadX + 1, winY2 - LOAD_TITLE_H, loadX + LOAD_WIDTH - 1, winY2 - 1, 0.5)
-
+    GlassInset(P.titleBar[1] + 1, P.titleBar[2], P.titleBar[3] - 1, P.titleBar[4] - 1, 0.5)
     gl.Color(1,0.7,0.2,1)
-    -- Place title text closer to the vertical middle of the header (baseline from bottom)
-    local titleBottom_td = loadY + LOAD_TITLE_H
-    local titleTextBaseline_td = titleBottom_td - 6  -- ~6px above bottom of header
-    local titleTextY = vsy - titleTextBaseline_td
-    gl.Text("LayoutPlannerPlus - Load Menu", loadX + 8, titleTextY, 14, "")
+    gl.Text("LayoutPlannerPlus - Load Menu", P.titleBar[1] + 8, P.titleBar[2] + 6, 14, "")
 
-    local r = LoadPopupRegions()
+    -- The search field draws itself, background and all.
+    searchBox:setRect(P.search[1], P.search[2], P.search[3], P.search[4], 11)
+    searchBox:draw()
 
-    -- search box (convert to bottom-up)
-    local searchY1 = vsy - (loadY + r.searchBox.y + r.searchBox.h)
-    local searchY2 = vsy - (loadY + r.searchBox.y)
-    GlassInset(loadX + r.searchBox.x, searchY1, loadX + r.searchBox.x + r.searchBox.w, searchY2, 0.45)
-    gl.Color(0.9,0.9,0.9,1)
-    local searchBoxTopY = loadY + r.searchBox.y  -- Top in top-down
-    local searchTextY = vsy - (searchBoxTopY + r.searchBox.h - 4)  -- Text Y in bottom-up (centered vertically)
-    local sText = searchText ~= "" and searchText or "Search..."
-    local sX    = loadX + r.searchBox.x + 4
-    gl.Text(sText, sX, searchTextY, 11, "")
-    -- Blinking caret for search input while load popup is open
-    if IsCaretVisible() then
-      local w = gl.GetTextWidth(sText) * 11
-      gl.Color(1,1,1,1)
-      gl.Text("|", sX + w + 2, searchTextY, 11, "")
-    end
+    GlassInset(P.list[1], P.list[2], P.list[3], P.list[4], 0.5)
 
-    -- list box (convert to bottom-up)
-    local listY1 = vsy - (loadY + r.listBox.y + r.listBox.h)
-    local listY2 = vsy - (loadY + r.listBox.y)
-    GlassInset(loadX + r.listBox.x, listY1, loadX + r.listBox.x + r.listBox.w, listY2, 0.5)
-
-    local rowH = 18
-    local maxVisible = 18  -- Show max 18 items (increased from 10)
-    local totalItems = #filteredLayouts
-    local hasScrollbar = totalItems > maxVisible
-    local scrollBarW = 8
-
-    -- Clamp scroll offset to a valid range
-    local maxScroll = math.max(0, totalItems - maxVisible)
-    if listScrollOffset > maxScroll then listScrollOffset = maxScroll end
-    if listScrollOffset < 0 then listScrollOffset = 0 end
-
-    -- Calculate item width (account for scrollbar if present)
-    local itemW = r.listBox.w - 4  -- Default: full width minus padding
-    if hasScrollbar then
-      itemW = itemW - scrollBarW - 2  -- Make room for scrollbar
-    end
-
-    -- Calculate positions: items start from TOP of list box
-    -- Spring uses bottom-up coordinates (Y=0 at bottom), so convert coordinates
-    local listBoxTopY = loadY + r.listBox.y  -- Top Y in top-down coordinates
-    local listBoxBottomY = listBoxTopY + r.listBox.h
-    local itemsToShow = math.min(maxVisible, totalItems - listScrollOffset)
-
-    -- Render items from top to bottom - convert to bottom-up coordinates
-    for row = 0, itemsToShow - 1 do
-      local itemIndex = listScrollOffset + row + 1
-      if itemIndex > totalItems then
-        break
-      end
-
-      local item = filteredLayouts[itemIndex]
-      -- Calculate top-down Y position
-      local itemTopY = listBoxTopY + 2 + (row * rowH)
-      local itemBottomY = itemTopY + rowH
-
-      -- Check if item would go beyond list box bottom
-      if itemTopY + rowH > listBoxBottomY then
-        break
-      end
-
-      -- Convert to bottom-up coordinates for gl.Rect and gl.Text
-      local rectY1 = vsy - itemBottomY  -- Bottom of item in bottom-up coords
-      local rectY2 = vsy - itemTopY    -- Top of item in bottom-up coords
-      local textY = vsy - (itemTopY + rowH - 4)  -- Text Y in bottom-up coords (centered vertically in row)
-
-      local rowX1 = loadX + r.listBox.x + 2
-      local rowX2 = rowX1 + itemW
-      local sel = (selectedIndex == itemIndex)
-      if sel then
-        if glass.ready then
-          glass.rectRound(rowX1, rectY1, rowX2, rectY2, glass.elementCorner * 0.5, 1, 1, 1, 1, GLASS.selectedFill)
-        else
-          gl.Color(0.3,0.5,0.8,0.6)
-          gl.Rect(rowX1, rectY1, rowX2, rectY2)
+    for i, r in ipairs(P.rows) do
+      local index = listScrollOffset + i
+      local item  = filteredLayouts[index]
+      if item then
+        if selectedIndex == index then
+          MarkRow(r[1], r[2], r[3], r[4], GLASS.selectedFill)
+        elseif RectHit(r, mx, my) then
+          MarkRow(r[1], r[2], r[3], r[4])
         end
-      elseif glass.ready and InRect(mx, my, rowX1, rectY1, rowX2, rectY2) then
-        glass.highlight(rowX1, rectY1, rowX2, rectY2, glass.elementCorner * 0.5, GLASS.hoverOpacity, GLASS.white)
-      end
-      gl.Color(1,1,1,1)
-      gl.Text(item.name or "?", loadX + r.listBox.x + 6, textY, 11, "")
-    end
 
-    -- Draw scrollbar if needed (when more than maxVisible items)
-    if hasScrollbar then
-      local scrollBarX = loadX + r.listBox.x + r.listBox.w - scrollBarW - 2
-      local scrollBarTopY = loadY + r.listBox.y + 2  -- Top in top-down coords
-      local scrollBarBottomY = scrollBarTopY + (r.listBox.h - 4)  -- Bottom in top-down coords
-      local scrollBarH = r.listBox.h - 4
-
-      -- Convert to bottom-up coordinates
-      local scrollBarY1 = vsy - scrollBarBottomY  -- Bottom in bottom-up
-      local scrollBarY2 = vsy - scrollBarTopY     -- Top in bottom-up
-
-      -- Scrollbar track (darker background)
-      if glass.ready then
-        glass.rectRound(scrollBarX, scrollBarY1, scrollBarX + scrollBarW, scrollBarY2,
-          glass.elementCorner * 0.5, 1, 1, 1, 1, GLASS.barTrack)
-      else
-        gl.Color(0.15,0.15,0.15,0.95)
-        gl.Rect(scrollBarX, scrollBarY1, scrollBarX + scrollBarW, scrollBarY2)
-      end
-
-      -- Scrollbar thumb (brighter, more visible)
-      local thumbY1, thumbY2
-      if maxScroll > 0 then
-        local thumbH = math.max(20, (maxVisible / totalItems) * scrollBarH)
-        local thumbTopY = scrollBarTopY + (listScrollOffset / maxScroll) * (scrollBarH - thumbH)
-        thumbY1 = vsy - (thumbTopY + thumbH)
-        thumbY2 = vsy - thumbTopY
-      else
-        -- Full scrollbar when at top
-        thumbY1, thumbY2 = scrollBarY1, scrollBarY2
-      end
-      if glass.ready then
-        glass.rectRound(scrollBarX + 1, thumbY1, scrollBarX + scrollBarW - 1, thumbY2,
-          glass.elementCorner * 0.4, 1, 1, 1, 1, GLASS.barThumb)
-      else
-        gl.Color(0.6,0.6,0.6,0.95)
-        gl.Rect(scrollBarX + 1, thumbY1, scrollBarX + scrollBarW - 1, thumbY2)
+        gl.Color(1,1,1,1)
+        gl.Text(item.name or "?", r[1] + 4, r[2] + 4, 11, "")
       end
     end
 
-    -- buttons (Load/Delete/Duplicate/Close)
-    -- Convert to bottom-up coordinates (vsy already retrieved above)
-    local function drawBtn(b, label, fill)
-      -- Convert button Y coordinates to bottom-up
-      local btnTopY = loadY + b.y
-      local btnBottomY = btnTopY + b.h
-      local rectY1 = vsy - btnBottomY
-      local rectY2 = vsy - btnTopY
-      local l, rr = loadX + b.x, loadX + b.x + b.w
-      GlassButton(l, rectY1, rr, rectY2, fill, InRect(mx, my, l, rectY1, rr, rectY2))
+    -- Scrollbar, drawn and grabbable from the same geometry.
+    if P.barThumb and glass.scroller then
+      glass.scroller(P.bar[1], P.bar[2], P.bar[3], P.bar[4], P.scrollContent, P.scrollPos,
+        RectHit(P.barThumb, mx, my), scrollDragging)
+    end
+
+    local function popupButton(r, label, fill)
+      GlassButton(r[1], r[2], r[3], r[4], fill, RectHit(r, mx, my))
       gl.Color(1,1,1,1)
       local tw = gl.GetTextWidth(label) * 11
-      local tx = l + (b.w - tw)/2
-      local ty = vsy - (btnTopY + b.h - 8)  -- Convert text Y to bottom-up (moved higher in button)
-      gl.Text(label, tx, ty, 11, "")
+      gl.Text(label, r[1] + ((r[3] - r[1]) - tw)/2, r[2] + 8, 11, "")
     end
-    drawBtn(r.btnLoad,  "Load",   GLASS.loadFill)
-    drawBtn(r.btnDel,   "Delete", GLASS.dangerFill)
-    drawBtn(r.btnDup,   "Copy",   GLASS.buttonFill)
-    drawBtn(r.btnClose, "Close",  GLASS.buttonFill)
+    popupButton(P.btnLoad,  "Load",   GLASS.loadFill)
+    popupButton(P.btnDel,   "Delete", GLASS.dangerFill)
+    popupButton(P.btnDup,   "Copy",   GLASS.buttonFill)
+    popupButton(P.btnClose, "Close",  GLASS.buttonFill)
 
-    -- thumbnail (convert to bottom-up coordinates)
     if selectedData then
-      -- DrawThumbnailSelected uses gl.Rect which expects bottom-up coordinates
-      -- thumbBox.y is top in top-down, convert to bottom in bottom-up
-      local thumbTopY = loadY + r.thumbBox.y  -- Top in top-down
-      local thumbBottomY_bu = vsy - (thumbTopY + 280)  -- Bottom in bottom-up (size=280)
-      DrawThumbnailSelected(loadX + r.thumbBox.x, thumbBottomY_bu, 280)
+      DrawThumbnailSelected(P.thumbBox[1], P.thumbBox[2] + 10, 280)
     else
-      local thumbY1 = vsy - (loadY + r.thumbBox.y + r.thumbBox.h)
-      local thumbY2 = vsy - (loadY + r.thumbBox.y)
-      GlassInset(loadX + r.thumbBox.x, thumbY1, loadX + r.thumbBox.x + r.thumbBox.w, thumbY2, 0.5)
+      GlassInset(P.thumbBox[1], P.thumbBox[2], P.thumbBox[3], P.thumbBox[4], 0.5)
       gl.Color(0.8,0.8,0.8,1)
-      local thumbTextY = vsy - (loadY + r.thumbBox.y + 140)
-      gl.Text("No layout selected", loadX + r.thumbBox.x + 90, thumbTextY, 12, "")
+      gl.Text("No layout selected", P.thumbBox[1] + 90, P.thumbBox[2] + 140, 12, "")
     end
   else
     SetGlassBlur("layoutplannerplus_load", nil)
@@ -1970,9 +1741,24 @@ end
 -- Initialization
 --------------------------------------------------------------------------------
 
+-- The two text fields. Built here rather than at file scope because the editbox
+-- draws through the game's font objects, which do not exist until the game does.
+local function CreateFields()
+  if searchBox then
+    return
+  end
+  searchBox = Editbox.new({
+    placeholder = "Search...",
+    clearable   = true,
+    onChange    = ApplySearchFilter,
+  })
+  nameBox = Editbox.new({ placeholder = "e.g. corner001 or wall02" })
+end
+
 function widget:Initialize()
   Spring.Echo("[LayoutPlannerPlus] ===== INITIALIZING LayoutPlannerPlus =====")
   RefreshGlass()
+  CreateFields()
   EnsureLayoutDir()
   RefreshSavedLayouts()
   ApplySearchFilter()
@@ -2046,5 +1832,3 @@ function widget:Update(dt)
     Spring.Echo("[LayoutPlannerPlus] All lines rendered")
   end
 end
-
-
