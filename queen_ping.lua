@@ -2,7 +2,7 @@ function widget:GetInfo()
     return {
         name    = "Queen Ping",
         desc    = "Pings when a Raptor Queen dies",
-        author  = "augustin",
+        author  = "timuela",
         date    = "2025-04-05",
         version = "1.0",
         layer   = 999,

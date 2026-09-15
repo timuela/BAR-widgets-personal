@@ -2,7 +2,7 @@ function widget:GetInfo()
     return {
         name    = "Auto DGun",
         desc    = "Commander auto dgun queens, mini queens, penguin and matronas when in range",
-        author  = "augustin",
+        author  = "timuela",
         date    = "2025-07-20",
         layer   = 0,
         enabled = true,
