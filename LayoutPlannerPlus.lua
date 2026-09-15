@@ -272,6 +272,30 @@ local mainDragDX, mainDragDY = 0, 0
 local MAIN_TITLE_H     = 24
 local MAIN_WIDTH       = 360
 local MAIN_PADDING     = 10   -- padding around elements
+local BTN_W, BTN_H     = 80, 24
+
+-- Saved layouts offered straight on the main window, so the ones in use do not
+-- need the load popup opened for them.
+local MAIN_LIST_ROWS   = 3
+local MAIN_LIST_ROW_H  = 18
+local MAIN_LIST_H      = 6 + MAIN_LIST_ROWS * MAIN_LIST_ROW_H
+-- Bottom of the list box, measured up from mainY (drawing is bottom-up).
+local MAIN_LIST_Y      = MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10 + 20 + 6
+
+-- One place for the window height: the drawing, every hit test and the drag
+-- math all read it, so the list can be resized without them drifting apart.
+local function MainWindowHeight()
+  return MAIN_LIST_Y + MAIN_LIST_H + 5 + MAIN_PADDING * 2
+end
+
+-- A saved-layout row on the main window. Shared by the drawing and the hit test
+-- so the two cannot disagree about where a row sits.
+local function MainListRowRect(i)
+  local l = mainX + 10
+  local r = mainX + MAIN_WIDTH - 10
+  local b = mainY + MAIN_LIST_Y + 3 + (i - 1) * MAIN_LIST_ROW_H
+  return l, b, r, b + MAIN_LIST_ROW_H
+end
 
 -- Load popup (draggable); positioned on screen by Initialize/ViewResize
 local loadPopupVisible = false
@@ -663,6 +687,30 @@ local function LoadLayoutData(raw)
   return layout
 end
 
+-- The rows the main window shows: the first few saved layouts by file name.
+-- Kept separate from filteredLayouts, which the load popup's search narrows.
+local mainListLayouts = {}
+
+local function RefreshMainList()
+  local sorted = {}
+  for i, item in ipairs(savedLayouts) do
+    sorted[i] = item
+  end
+
+  local function baseName(path)
+    return (path or ""):match("([^/\\]+)$") or ""
+  end
+
+  table.sort(sorted, function(a, b)
+    return baseName(a.filename) < baseName(b.filename)
+  end)
+
+  mainListLayouts = {}
+  for i = 1, math.min(MAIN_LIST_ROWS, #sorted) do
+    mainListLayouts[i] = sorted[i]
+  end
+end
+
 local function RefreshSavedLayouts()
   savedLayouts = {}
 
@@ -758,6 +806,8 @@ local function RefreshSavedLayouts()
 
   -- initial filtered list is full list
   filteredLayouts = savedLayouts
+
+  RefreshMainList()
 end
 
 local function ApplySearchFilter()
@@ -1123,7 +1173,7 @@ end
 
 local function HitInMain(mx, my)
   return mx >= mainX and mx <= mainX + MAIN_WIDTH and
-         my >= mainY and my <= mainY + 180
+         my >= mainY and my <= mainY + MainWindowHeight()
 end
 
 local function HitInLoadPopup(mx, my)
@@ -1139,8 +1189,6 @@ local function MainButtonHit(mx, my, bx, by, bw, bh)
 end
 
 -- Button layout in main window
-local BTN_W, BTN_H = 80, 24
-
 local function MainButtonsLayout()
   local y = MAIN_TITLE_H + 10
   return {
@@ -1443,11 +1491,26 @@ function widget:MousePress(mx, my, button)
     end
   end
 
+  -- saved-layout rows on the main window: arm the layout for placement, the
+  -- same state the load popup leaves behind. Rendering stays a separate step.
+  if button == 1 and HitInMain(mx, my) then
+    for i, item in ipairs(mainListLayouts) do
+      local l, b, r, t = MainListRowRect(i)
+      if InRect(mx, my, l, b, r, t) then
+        selectedIndex  = nil
+        selectedData   = item.data
+        layoutRotation = 0
+        layoutInverted = false
+        Spring.Echo("[LayoutPlus] Activated layout: " .. tostring(item.name or "?"))
+        return true
+      end
+    end
+  end
+
   -- Exit button click (in title bar)
   if button == 1 and HitInMain(mx, my) then
     local lx, ly = mx - mainX, my - mainY
-    local contentH = MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10 + 20 + 5
-    local h        = contentH + MAIN_PADDING * 2
+    local h        = MainWindowHeight()
     local exitBtnX = MAIN_WIDTH - 24
     local exitBtnY = h - MAIN_TITLE_H + 2
     if lx >= exitBtnX and lx <= exitBtnX + 20 and
@@ -1467,9 +1530,7 @@ function widget:MousePress(mx, my, button)
   -- main window drag (only title bar or empty edges, after button handling)
   if button == 1 and HitInMain(mx, my) then
     local lx, ly = mx - mainX, my - mainY
-    -- main window height: two button rows + snap row + padding
-    local contentH = MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10 + 20 + 5
-    local h        = contentH + MAIN_PADDING * 2
+    local h        = MainWindowHeight()
     local onTitleBar = ly >= h - MAIN_TITLE_H and ly <= h
     local edgeMargin = 5
     local onEdge = (lx <= edgeMargin or lx >= MAIN_WIDTH - edgeMargin or
@@ -1824,9 +1885,8 @@ function widget:DrawScreen()
   if not glass.ready then RefreshGlass() end
   local mx, my = Spring.GetMouseState()
 
-  -- main window (fixed content height + padding)
-  local contentH = MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10 + 20 + 5
-  local h        = contentH + MAIN_PADDING * 2
+  -- main window
+  local h        = MainWindowHeight()
   local mainTop  = mainY + h
 
   SetGlassBlur("layoutplannerplus_main", mainX, mainY, mainX + MAIN_WIDTH, mainTop)
@@ -1894,6 +1954,39 @@ function widget:DrawScreen()
     gl.Color(1,1,1,1)
     gl.Text(snapLabels[i+1], l + 4, snapY + 5, 10, "")
     snapX = snapX + w + 4
+  end
+
+  -- Saved layouts, first three by file name. Picking one arms it for placement
+  -- exactly as the load popup does; nothing is drawn to the map here, that is
+  -- still the Render button.
+  local listX1 = mainX + 10
+  local listX2 = mainX + MAIN_WIDTH - 10
+  local listY1 = mainY + MAIN_LIST_Y
+  GlassInset(listX1, listY1, listX2, listY1 + MAIN_LIST_H)
+
+  if #mainListLayouts == 0 then
+    gl.Color(0.55,0.55,0.55,1)
+    gl.Text("No saved layouts", listX1 + 6, listY1 + MAIN_LIST_H/2 - 5, 11, "")
+  else
+    for i, item in ipairs(mainListLayouts) do
+      local l, b, r, t = MainListRowRect(i)
+      local active  = selectedData ~= nil and item.data == selectedData
+      local hovered = InRect(mx, my, l, b, r, t)
+
+      if active then
+        if glass.ready then
+          glass.rectRound(l, b, r, t, glass.elementCorner * 0.5, 1, 1, 1, 1, GLASS.selectedFill)
+        else
+          gl.Color(1,1,1,0.13)
+          gl.Rect(l, b, r, t)
+        end
+      elseif hovered and glass.ready then
+        glass.highlight(l, b, r, t, glass.elementCorner * 0.5, GLASS.hoverOpacity, GLASS.white)
+      end
+
+      gl.Color(1,1,1,1)
+      gl.Text(item.name or "?", l + 4, b + 4, 11, "")
+    end
   end
 
   -- hint text
@@ -2203,8 +2296,7 @@ function widget:Initialize()
   ApplySearchFilter()
   -- Position main window centered on screen
   local vsx, vsy = gl.GetViewSizes()
-  local contentH = MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10 + 20 + 5
-  local h        = contentH + MAIN_PADDING * 2
+  local h        = MainWindowHeight()
   mainX, mainY = MidScreen(vsx, vsy, MAIN_WIDTH, h)
   -- Start load popup over the main window
   loadX, loadY = mainX, mainY
@@ -2216,8 +2308,7 @@ end
 -- Keep the main window centered when the screen size changes
 function widget:ViewResize()
   local vsx, vsy = gl.GetViewSizes()
-  local contentH = MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10 + 20 + 5
-  local h        = contentH + MAIN_PADDING * 2
+  local h        = MainWindowHeight()
   mainX, mainY = MidScreen(vsx, vsy, MAIN_WIDTH, h)
   loadX, loadY = mainX, mainY
   -- Corner radius and padding are derived from the viewport, so the glass
