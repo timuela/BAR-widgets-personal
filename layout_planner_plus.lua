@@ -20,39 +20,30 @@ local GL     = GL
 local widgetHandler = widgetHandler
 
 local BU_SIZE     = 16         -- 1 BU = 16 game units
-local HALF_BU     = BU_SIZE/2
 local SQUARE_SIZE = 3 * BU_SIZE
 local CHUNK_SIZE  = 4 * SQUARE_SIZE
 
 local LAYOUT_DIR  = "LuaUI/Widgets/layout_planner_plus/"
+
+-- Profiles are JSON. The game ships the codec, and using it for both directions
+-- means the file shape cannot drift from something a parser will accept.
+local Json = Json
+if not (Json and Json.encode and Json.decode) then
+  local ok, lib = pcall(VFS.Include, "common/luaUtilities/json.lua")
+  if ok and type(lib) == "table" and lib.encode and lib.decode then
+    Json = lib
+  else
+    Spring.Echo("[LayoutPlus] JSON library unavailable: profiles cannot be read or written")
+  end
+end
 
 --------------------------------------------------------------------------------
 -- Layout data
 --------------------------------------------------------------------------------
 
 local currentLayout = {
-  buildings = {
-    [1]  = {},
-    [2]  = {},
-    [3]  = {},
-    [4]  = {},
-    [6]  = {},
-    [12] = {},
-  },
   lines = {}
 }
-
--- Kept for compatibility with existing layout files (buildings), but
--- not exposed in the UI anymore – LayoutPlannerPlus is line-focused.
-local buildingTypes = {
-  { name = "Small",  size = 2 },
-  { name = "Square", size = 3 },
-  { name = "Big",    size = 4 },
-  { name = "Large",  size = 6 },
-  { name = "Chunk",  size = 12 },
-}
-
-local currentSizeIndex = 2      -- unused in Plus UI (line-only), kept for compatibility
 
 --------------------------------------------------------------------------------
 -- State: drawing & UI
@@ -64,9 +55,6 @@ local drawingLinesMode = false
 -- Line drawing
 local lineStart        = nil    -- for free lines
 local removeDragStart  = nil    -- for right-drag removal box
-
-local altMode          = false
-local ctrlMode         = false
 
 -- Remember drawing state when opening load popup
 local wasDrawingBeforeLoad = false
@@ -377,23 +365,8 @@ end
 --------------------------------------------------------------------------------
 
 local function ClearCurrentLayout()
-  for size, group in pairs(currentLayout.buildings) do
-    currentLayout.buildings[size] = {}
-  end
   currentLayout.lines = {}
   Spring.Echo("[LayoutPlus] Cleared current layout")
-end
-
-local function AddBuilding(bx, bz, size)
-  -- kept for compatibility, but not used in Plus (line-focused)
-  local group = currentLayout.buildings[size]
-  if not group then return end
-  group[#group + 1] = { bx, bz }
-end
-
-local function ToggleBuilding(bx, bz, size)
-  -- disabled in Plus: we focus on line drawing only
-  return
 end
 
 local function AddLineBU(x1, z1, x2, z2)
@@ -406,14 +379,6 @@ end
 
 -- Translate layout (for WASD movement)
 local function TranslateLayout(dx, dz)
-  -- Translate buildings
-  for size, group in pairs(currentLayout.buildings) do
-    for _, pos in ipairs(group) do
-      pos[1] = pos[1] + dx
-      pos[2] = pos[2] + dz
-    end
-  end
-  -- Translate lines
   for _, line in ipairs(currentLayout.lines) do
     line[1] = line[1] + dx
     line[3] = line[3] + dx
@@ -506,16 +471,6 @@ local function ComputeBounds(layout)
   local minX, maxX = math.huge, -math.huge
   local minZ, maxZ = math.huge, -math.huge
 
-  for size, group in pairs(layout.buildings or {}) do
-    for _, pos in ipairs(group) do
-      local x, z = pos[1], pos[2]
-      minX = math.min(minX, x)
-      maxX = math.max(maxX, x + size - 1)
-      minZ = math.min(minZ, z)
-      maxZ = math.max(maxZ, z + size - 1)
-    end
-  end
-
   for _, line in ipairs(layout.lines or {}) do
     local x1, z1, x2, z2 = line[1], line[2], line[3], line[4]
     minX = math.min(minX, x1, x2)
@@ -536,10 +491,15 @@ local function SaveLayoutAs(name, tags)
     Spring.Echo("[LayoutPlus] Nothing to save")
     return
   end
+  if not Json then
+    Spring.Echo("[LayoutPlus] Cannot save: no JSON library available")
+    return
+  end
+
   name = name or "layout"
   local safeName = name:gsub("[^%w_%-]", "_")
   if safeName == "" then safeName = "layout" end
-  local filename = LAYOUT_DIR .. safeName .. ".txt"
+  local filename = LAYOUT_DIR .. safeName .. ".json"
 
   -- avoid overwriting by appending a number if exists
   local counter = 1
@@ -549,55 +509,36 @@ local function SaveLayoutAs(name, tags)
     if not f then break end
     f:close()
     safeName = base .. "_" .. counter
-    filename = LAYOUT_DIR .. safeName .. ".txt"
+    filename = LAYOUT_DIR .. safeName .. ".json"
     counter = counter + 1
   end
 
   local minX, maxX, minZ, maxZ = ComputeBounds(currentLayout)
-  local width  = maxX - minX + 1
-  local height = maxZ - minZ + 1
 
-  local function serializeLayout()
-    local result = {}
-    local indent = 0
+  -- Coordinates are stored relative to the layout's own corner, so a layout
+  -- does not carry the map position it was drawn at.
+  local lines = {}
+  for _, ln in ipairs(currentLayout.lines) do
+    lines[#lines + 1] = { ln[1] - minX, ln[2] - minZ, ln[3] - minX, ln[4] - minZ }
+  end
 
-    local function ind() return string.rep("  ", indent) end
-    local function line(s) result[#result+1] = ind() .. s end
+  local profile = {
+    name    = name,
+    width   = maxX - minX + 1,
+    height  = maxZ - minZ + 1,
+    maxX    = maxX,
+    maxZ    = maxZ,
+    minSize = 1,
+    layout  = { lines = lines },
+  }
+  if tags and #tags > 0 then
+    profile.tags = tags
+  end
 
-    line("layout = {")
-    indent = indent + 1
-
-    -- buildings
-    line("buildings = {")
-    indent = indent + 1
-    for size, group in pairs(currentLayout.buildings) do
-      line("[" .. size .. "] = {")
-      indent = indent + 1
-      for _, pos in ipairs(group) do
-        local x = pos[1] - minX
-        local z = pos[2] - minZ
-        line(string.format("{%d, %d},", x, z))
-      end
-      indent = indent - 1
-      line("},")
-    end
-    indent = indent - 1
-    line("},") -- end buildings
-
-    -- lines
-    line("lines = {")
-    indent = indent + 1
-    for _, ln in ipairs(currentLayout.lines) do
-      local x1, z1, x2, z2 = ln[1]-minX, ln[2]-minZ, ln[3]-minX, ln[4]-minZ
-      line(string.format("{%d, %d, %d, %d},", x1, z1, x2, z2))
-    end
-    indent = indent - 1
-    line("}")
-
-    indent = indent - 1
-    line("}") -- end layout
-
-    return table.concat(result, "\n")
+  local ok, text = pcall(Json.encode, profile)
+  if not ok then
+    Spring.Echo("[LayoutPlus] Could not encode " .. filename .. ": " .. tostring(text))
+    return
   end
 
   local f = io.open(filename, "w")
@@ -605,86 +546,51 @@ local function SaveLayoutAs(name, tags)
     Spring.Echo("[LayoutPlus] Could not open " .. filename .. " for write")
     return
   end
-
-  f:write("return {\n")
-  f:write("  name = " .. string.format("%q", name) .. ",\n")
-  if tags and #tags > 0 then
-    f:write("  tags = {")
-    for i, t in ipairs(tags) do
-      if i > 1 then f:write(", ") end
-      f:write(string.format("%q", t))
-    end
-    f:write("},\n")
-  end
-  f:write("  width = " .. width .. ",\n")
-  f:write("  height = " .. height .. ",\n")
-  f:write("  maxX = " .. maxX .. ",\n")
-  f:write("  maxZ = " .. maxZ .. ",\n")
-  f:write("  minSize = 1,\n")
-  f:write("  " .. serializeLayout() .. "\n")
-  f:write("}\n")
+  f:write(text)
   f:close()
 
   Spring.Echo("[LayoutPlus] Saved layout as " .. filename)
 end
 
 local function CopyEmptyLayout()
-  local copy = {
-    buildings = {
-      [1]  = {},
-      [2]  = {},
-      [3]  = {},
-      [4]  = {},
-      [6]  = {},
-      [12] = {},
-    },
-    lines = {}
-  }
-  return copy
+  return { lines = {} }
 end
 
 local function LoadLayoutData(raw)
-  -- raw: table returned from layout file (may be old or new)
   local layout = CopyEmptyLayout()
-  if not raw or type(raw) ~= "table" then
-    Spring.Echo("[LayoutPlus] LoadLayoutData: raw is not a table")
+  if type(raw) ~= "table" or type(raw.layout) ~= "table" then
+    Spring.Echo("[LayoutPlus] LoadLayoutData: no layout data")
     return layout
   end
-  
-  -- Check if it's a legacy format (layout data directly in raw) or new format (raw.layout)
-  local l = raw.layout
-  if not l or type(l) ~= "table" then
-    -- Legacy format might have layout data directly in raw
-    if raw.buildings or raw.lines then
-      l = raw
-      Spring.Echo("[LayoutPlus] LoadLayoutData: Using legacy format (layout data in root)")
-    else
-      Spring.Echo("[LayoutPlus] LoadLayoutData: No layout data found")
-      return layout
-    end
-  end
 
-  -- buildings
-  if type(l.buildings) == "table" then
-    for size, group in pairs(l.buildings) do
-      if layout.buildings[size] then
-        for _, pos in ipairs(group) do
-          layout.buildings[size][#layout.buildings[size]+1] = { pos[1], pos[2] }
-        end
-      end
-    end
-  end
-
-  -- lines
-  if type(l.lines) == "table" then
-    for _, ln in ipairs(l.lines) do
-      if #ln == 4 then
-        layout.lines[#layout.lines+1] = { ln[1], ln[2], ln[3], ln[4] }
-      end
+  for _, ln in ipairs(raw.layout.lines or {}) do
+    if #ln == 4 then
+      layout.lines[#layout.lines + 1] = { ln[1], ln[2], ln[3], ln[4] }
     end
   end
 
   return layout
+end
+
+-- Reads a profile written by SaveLayoutAs. Returns nil and a reason on failure.
+local function ReadProfile(full)
+  if not Json then
+    return nil, "no JSON library"
+  end
+
+  local f = io.open(full, "r")
+  if not f then
+    return nil, "could not open for read"
+  end
+  local text = f:read("*all")
+  f:close()
+
+  local ok, raw = pcall(Json.decode, text)
+  if not ok or type(raw) ~= "table" then
+    return nil, "not valid JSON"
+  end
+
+  return raw
 end
 
 -- The rows the main window shows: the first few saved layouts by file name.
@@ -715,91 +621,28 @@ local function RefreshSavedLayouts()
   savedLayouts = {}
 
   if VFS and VFS.DirList then
-    -- 1) New-format layouts in layout_planner_plus folder
-    local files = VFS.DirList(LAYOUT_DIR, "*.txt", VFS.RAW_FIRST)
+    local files = VFS.DirList(LAYOUT_DIR, "*.json", VFS.RAW_FIRST)
     for _, full in ipairs(files or {}) do
       local short = full:match("([^/\\]+)$") or full
-      local chunk, err = loadfile(full)
-      if chunk then
-        local ok, raw = pcall(chunk)
-        if ok and type(raw) == "table" then
-          local name = raw.name
-          if type(name) ~= "string" or name == "" then
-            name = short:gsub("%.txt$", ""):gsub("_", " ")
-          end
-          local tags = raw.tags or {}
-          local layout = LoadLayoutData(raw)
-          -- Store width/height from file for proper centering
-          layout.fileWidth = raw.width
-          layout.fileHeight = raw.height
-          layout.fileMinSize = raw.minSize
-          savedLayouts[#savedLayouts+1] = {
-            name     = name,
-            tags     = tags,
-            filename = full,
-            data     = layout,
-          }
+      local raw, err = ReadProfile(full)
+      if raw then
+        local name = raw.name
+        if type(name) ~= "string" or name == "" then
+          name = short:gsub("%.json$", ""):gsub("_", " ")
         end
+        local layout = LoadLayoutData(raw)
+        -- Store width/height from file for proper centering
+        layout.fileWidth = raw.width
+        layout.fileHeight = raw.height
+        layout.fileMinSize = raw.minSize
+        savedLayouts[#savedLayouts+1] = {
+          name     = name,
+          tags     = raw.tags or {},
+          filename = full,
+          data     = layout,
+        }
       else
-        Spring.Echo("[LayoutPlus] loadfile error: " .. tostring(err))
-      end
-    end
-
-    -- 2) Legacy layouts in main Widgets folder: layout_*.txt
-    local legacy = VFS.DirList("LuaUI/Widgets/", "layout_*.txt", VFS.RAW_FIRST)
-    Spring.Echo("[LayoutPlus] Found " .. #(legacy or {}) .. " legacy layout files")
-    for _, full in ipairs(legacy or {}) do
-      -- Skip if already in savedLayouts list
-      local already = false
-      for _, it in ipairs(savedLayouts) do
-        if it.filename == full then
-          already = true
-          break
-        end
-      end
-      if not already then
-        local short = full:match("([^/\\]+)$") or full
-        -- Skip config files (not layout files)
-        if short:match("config") then
-          -- Silently skip config files
-        else
-          local chunk, err = loadfile(full)
-          if chunk then
-          local ok, raw = pcall(chunk)
-          if ok and type(raw) == "table" then
-            local baseName = short:gsub("%.txt$", ""):gsub("_", " ")
-            local name = (raw.name and raw.name ~= "") and raw.name or (baseName .. " (legacy)")
-            local tags = raw.tags or {}
-            local layout = LoadLayoutData(raw)
-            -- Store width/height from file for proper centering (legacy files have normalized coords)
-            layout.fileWidth = raw.width
-            layout.fileHeight = raw.height
-            layout.fileMinSize = raw.minSize
-            -- Debug: check if layout has data
-            local lineCount = #(layout.lines or {})
-            local buildingCount = 0
-            for _, group in pairs(layout.buildings or {}) do
-              buildingCount = buildingCount + #(group or {})
-            end
-            Spring.Echo("[LayoutPlus] Loaded legacy: " .. name .. " (" .. lineCount .. " lines, " .. buildingCount .. " buildings, size " .. (raw.width or "?") .. "x" .. (raw.height or "?") .. ")")
-            savedLayouts[#savedLayouts+1] = {
-              name     = name,
-              tags     = tags,
-              filename = full,
-              data     = layout,
-            }
-          else
-            -- File executed but didn't return a table (might be empty or invalid format)
-            if not ok then
-              Spring.Echo("[LayoutPlus] legacy file error executing " .. short .. ": " .. tostring(raw))
-            else
-              Spring.Echo("[LayoutPlus] legacy file " .. short .. " did not return a table (got " .. type(raw) .. ")")
-            end
-          end
-          else
-            Spring.Echo("[LayoutPlus] legacy loadfile error: " .. tostring(err))
-          end
-        end -- end config file skip check
+        Spring.Echo("[LayoutPlus] Could not read " .. short .. ": " .. tostring(err))
       end
     end
   end
@@ -873,18 +716,6 @@ local function DrawThumbnailSelected(x0, y0, size)
     gl.Vertex(x0+size,   y0+size)
     gl.Vertex(x0,        y0+size)
   end)
-
-  -- draw buildings as small squares
-  for sizeBU, group in pairs(layout.buildings) do
-    for _, pos in ipairs(group) do
-      local bx, bz = pos[1], pos[2]
-      local lx = x0 + size/2 + (bx - cx) * scale
-      local ly = y0 + size/2 + (bz - cz) * scale
-      local half = (sizeBU * 0.4) * scale
-      gl.Color(0.2, 0.8, 0.2, 0.9)
-      gl.Rect(lx - half, ly - half, lx + half, ly + half)
-    end
-  end
 
   -- lines overlay
   gl.Color(1, 1, 0, 1)
@@ -976,106 +807,14 @@ local function DrawEdges(edges)
   renderingToGame = true
 end
 
--- Collect the outer contour of the current layout: merge shared edges of
--- adjacent same-size buildings into single lines, then add free lines.
-local function CollectEdges()
-  local function edgeKey(x1, z1, x2, z2)
-    -- Normalize to avoid reversed duplicate keys
-    if x1 > x2 or (x1 == x2 and z1 > z2) then
-      x1, z1, x2, z2 = x2, z2, x1, z1
-    end
-    return x1 .. "," .. z1 .. "," .. x2 .. "," .. z2
-  end
-
-  local rawEdges = {}
-
-  -- 1. Generate 4 outer edges per building
-  for size, buildings in pairs(currentLayout.buildings) do
-    for _, pos in ipairs(buildings) do
-      local bx, bz = pos[1], pos[2]
-      local edges = {
-        {bx, bz, bx + size, bz},               -- top
-        {bx + size, bz, bx + size, bz + size}, -- right
-        {bx + size, bz + size, bx, bz + size}, -- bottom
-        {bx, bz + size, bx, bz},               -- left
-      }
-
-      for _, e in ipairs(edges) do
-        local k = edgeKey(unpack(e))
-        if rawEdges[k] then
-          rawEdges[k] = nil -- shared/internal edge — remove it
-        else
-          rawEdges[k] = { x1 = e[1], z1 = e[2], x2 = e[3], z2 = e[4] }
-        end
-      end
-    end
-  end
-
-  -- 2. Group by horizontal and vertical
-  local horizontal, vertical = {}, {}
-  for _, edge in pairs(rawEdges) do
-    if edge.z1 == edge.z2 then
-      table.insert(horizontal, edge)
-    elseif edge.x1 == edge.x2 then
-      table.insert(vertical, edge)
-    end
-  end
-
-  local function mergeLines(edges, isHorizontal)
-    local merged = {}
-    local axis1, axis2 = isHorizontal and "x" or "z", isHorizontal and "z" or "x"
-
-    -- Group by fixed axis2 (e.g., all z for horizontal lines)
-    local groups = {}
-    for _, e in ipairs(edges) do
-      local key = tostring(e[axis2 .. "1"])
-      groups[key] = groups[key] or {}
-      local a1 = math.min(e[axis1 .. "1"], e[axis1 .. "2"])
-      local a2 = math.max(e[axis1 .. "1"], e[axis1 .. "2"])
-      table.insert(groups[key], { a1 = a1, a2 = a2 })
-    end
-
-    for coord, segs in pairs(groups) do
-      table.sort(segs, function(a, b) return a.a1 < b.a1 end)
-
-      local currentA1, currentA2 = segs[1].a1, segs[1].a2
-      for i = 2, #segs do
-        local seg = segs[i]
-        if seg.a1 <= currentA2 then
-          currentA2 = math.max(currentA2, seg.a2) -- merge
-        else
-          -- emit previous
-          local line = isHorizontal
-            and { x1 = currentA1, z1 = tonumber(coord), x2 = currentA2, z2 = tonumber(coord) }
-            or  { x1 = tonumber(coord), z1 = currentA1, x2 = tonumber(coord), z2 = currentA2 }
-          table.insert(merged, line)
-          currentA1, currentA2 = seg.a1, seg.a2
-        end
-      end
-      -- final segment
-      local line = isHorizontal
-        and { x1 = currentA1, z1 = tonumber(coord), x2 = currentA2, z2 = tonumber(coord) }
-        or  { x1 = tonumber(coord), z1 = currentA1, x2 = tonumber(coord), z2 = currentA2 }
-      table.insert(merged, line)
-    end
-
-    return merged
-  end
-
-  -- 3. Merge all segments
-  local result = {}
-  for _, e in ipairs(mergeLines(horizontal, true)) do table.insert(result, e) end
-  for _, e in ipairs(mergeLines(vertical, false)) do table.insert(result, e) end
-
-  for _, line in ipairs(currentLayout.lines) do
-    table.insert(result, { x1 = line[1], z1 = line[2], x2 = line[3], z2 = line[4] })
-  end
-
-  return result
-end
-
+-- Hands the current layout to the renderer. Buildings used to be expanded into
+-- their merged outer contour here; the widget is line-only now.
 local function CollectAndDraw()
-  DrawEdges(CollectEdges())
+  local edges = {}
+  for _, line in ipairs(currentLayout.lines) do
+    edges[#edges + 1] = { x1 = line[1], z1 = line[2], x2 = line[3], z2 = line[4] }
+  end
+  DrawEdges(edges)
 end
 
 --------------------------------------------------------------------------------
@@ -1334,11 +1073,11 @@ function widget:MousePress(mx, my, button)
               local text = f:read("*all")
               f:close()
               -- find new filename
-              local base = item.filename:gsub("%.txt$", "")
+              local base = item.filename:gsub("%.json$", "")
               local n = 1
               local newName
               while true do
-                newName = base .. "_copy" .. n .. ".txt"
+                newName = base .. "_copy" .. n .. ".json"
                 local t = io.open(newName, "r")
                 if not t then break end
                 t:close()
@@ -1553,63 +1292,25 @@ function widget:MousePress(mx, my, button)
     if pos then
       local bx, bz = WorldToBU(pos[1], pos[3])
       local layout = selectedData
-      -- Use file width/height if available (for legacy files with normalized coords)
-      -- Otherwise compute bounds from actual coordinates
+
+      -- A profile stores its coordinates normalised to its own corner, so the
+      -- width/height it was saved at is what centres it under the cursor. A
+      -- profile without those falls back to its computed bounds.
       local cx, cz
       if layout.fileWidth and layout.fileHeight then
-        -- Legacy format: coordinates are normalized (start at 0,0), use file dimensions for centering
         local minSize = layout.fileMinSize or 1
         cx = math.floor((layout.fileWidth + minSize) / 2)
         cz = math.floor((layout.fileHeight + minSize) / 2)
       else
-        -- New format: compute bounds from actual coordinates
         local minX, maxX, minZ, maxZ = ComputeBounds(layout)
         if not minX then return false end
-        cx = (minX + maxX)/2
-        cz = (minZ + maxZ)/2
+        cx = (minX + maxX) / 2
+        cz = (minZ + maxZ) / 2
       end
+
       if cx and cz then
-        -- Calculate translation offset (like original LayoutPlanner)
-        -- For legacy: shift = (width + minSize)/2, translate by (bx - shift, bz - shift)
-        -- For new: shift = center, translate by (bx - shift, bz - shift)
-        local shiftX, shiftZ
-        if layout.fileWidth and layout.fileHeight then
-          -- Legacy format: use file dimensions
-          local minSize = layout.fileMinSize or 1
-          shiftX = math.floor((layout.fileWidth + minSize) / 2)
-          shiftZ = math.floor((layout.fileHeight + minSize) / 2)
-        else
-          -- New format: use computed center
-          shiftX = cx
-          shiftZ = cz
-        end
-        
-        -- copy buildings as line edges (with transformation and translation)
-        for size, group in pairs(layout.buildings) do
-          for _, posBU in ipairs(group) do
-            -- First translate to cursor-relative position (like original LayoutPlanner)
-            local tx1, tz1 = posBU[1] + (bx - shiftX), posBU[2] + (bz - shiftZ)
-            local tx2, tz2 = posBU[1] + size + (bx - shiftX), posBU[2] + (bz - shiftZ)
-            local tx3, tz3 = posBU[1] + size + (bx - shiftX), posBU[2] + size + (bz - shiftZ)
-            local tx4, tz4 = posBU[1] + (bx - shiftX), posBU[2] + size + (bz - shiftZ)
-            
-            -- Then apply rotation/inversion relative to the placed center (bx, bz)
-            local relX1, relZ1 = TransformBU(tx1 - bx, tz1 - bz, layoutRotation, layoutInverted)
-            local relX2, relZ2 = TransformBU(tx2 - bx, tz2 - bz, layoutRotation, layoutInverted)
-            local relX3, relZ3 = TransformBU(tx3 - bx, tz3 - bz, layoutRotation, layoutInverted)
-            local relX4, relZ4 = TransformBU(tx4 - bx, tz4 - bz, layoutRotation, layoutInverted)
-            
-            -- Final position
-            local sx1, sz1 = relX1 + bx, relZ1 + bz
-            local sx2, sz2 = relX2 + bx, relZ2 + bz
-            local sx3, sz3 = relX3 + bx, relZ3 + bz
-            local sx4, sz4 = relX4 + bx, relZ4 + bz
-            AddLineBU(sx1, sz1, sx2, sz2)
-            AddLineBU(sx2, sz2, sx3, sz3)
-            AddLineBU(sx3, sz3, sx4, sz4)
-            AddLineBU(sx4, sz4, sx1, sz1)
-          end
-        end
+        local shiftX, shiftZ = cx, cz
+
         -- copy layout lines (with transformation and translation)
         for _, ln in ipairs(layout.lines) do
           -- First translate to cursor-relative position
@@ -1837,12 +1538,6 @@ function widget:KeyPress(key, mods, isRepeat)
     end
   end
 
-  if key == 306 then -- CTRL
-    ctrlMode = true
-  elseif key == 308 then -- ALT
-    altMode = true
-  end
-
   return false
 end
 
@@ -1863,14 +1558,6 @@ function widget:MouseWheel(up, value)
     return true
   end
   return false
-end
-
-function widget:KeyRelease(key, mods)
-  if key == 306 then
-    ctrlMode = false
-  elseif key == 308 then
-    altMode = false
-  end
 end
 
 --------------------------------------------------------------------------------
