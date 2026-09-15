@@ -428,6 +428,42 @@ local function GetSnappedCameraDirection(dx, dz)
   return tx, tz
 end
 
+-- WASD translation is polled rather than event-driven. BAR's action handler runs
+-- before every widget's KeyPress and consumes presses bound to registered
+-- actions - "stop" is one of them, registered by the pregame build queue - so a
+-- widget cannot count on receiving a movement key at all. Reading the pressed
+-- set sidesteps both that and the engine's own binds for these letters.
+local MOVE_STEP_TIME = 0.1   -- seconds between steps while a movement key is held
+local moveStepTimer  = MOVE_STEP_TIME
+
+local function UpdateKeyTranslation(dt)
+  if not allowTranslationByKeys then return end
+  if showSaveDialog or loadPopupVisible or selectedData then return end
+
+  local keys = Spring.GetPressedKeys()
+  local dx, dz = 0, 0
+
+  if keys[119] then dz = dz + 1 end -- W
+  if keys[115] then dz = dz - 1 end -- S
+  if keys[97]  then dx = dx - 1 end -- A
+  if keys[100] then dx = dx + 1 end -- D
+
+  if dx == 0 and dz == 0 then
+    moveStepTimer = MOVE_STEP_TIME   -- idle again, so the next press steps at once
+    return
+  end
+
+  moveStepTimer = moveStepTimer + dt
+  if moveStepTimer < MOVE_STEP_TIME then return end
+  moveStepTimer = 0
+
+  local tx, tz = GetSnappedCameraDirection(dx, dz)
+  if tx ~= 0 or tz ~= 0 then
+    TranslateLayout(tx, tz)
+    Spring.Echo("[LayoutPlus] Translated layout by (" .. tx .. ", " .. tz .. ")")
+  end
+end
+
 --------------------------------------------------------------------------------
 -- Save / load: file format & IO
 --------------------------------------------------------------------------------
@@ -1729,22 +1765,14 @@ function widget:KeyPress(key, mods, isRepeat)
     end
   end
 
-  -- WASD key translation (when enabled and not in dialogs)
+  -- The movement itself happens in Update, from the polled key state. The press
+  -- is still claimed here so the engine's own binds for these letters - wait,
+  -- attack, manualfire - do not fire while a layout is being nudged. A press
+  -- BAR consumes first (S during the prepare phase) never reaches this, which
+  -- is exactly why the movement could not live here in the first place.
   if allowTranslationByKeys and not showSaveDialog and not loadPopupVisible and not selectedData then
-    local dx, dz = 0, 0
-    
-    if key == 119 then dz = dz + 1 end -- W
-    if key == 115 then dz = dz - 1 end -- S
-    if key == 97  then dx = dx - 1 end -- A
-    if key == 100 then dx = dx + 1 end -- D
-    
-    if dx ~= 0 or dz ~= 0 then
-      local tx, tz = GetSnappedCameraDirection(dx, dz)
-      if tx ~= 0 or tz ~= 0 then
-        TranslateLayout(tx, tz)
-        Spring.Echo("[LayoutPlus] Translated layout by (" .. tx .. ", " .. tz .. ")")
-        return true
-      end
+    if key == 119 or key == 115 or key == 97 or key == 100 then
+      return true
     end
   end
 
@@ -2220,6 +2248,8 @@ end
 -- Update: gradual rendering queue processing
 --------------------------------------------------------------------------------
 function widget:Update(dt)
+  UpdateKeyTranslation(dt)
+
   if not renderingToGame then return end
 
   -- Draw slowly: Spring drops marker lines if they are added too quickly
