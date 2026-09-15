@@ -67,7 +67,6 @@ local removeDragStart  = nil    -- for right-drag removal box
 
 local altMode          = false
 local ctrlMode         = false
-local lastMidClickTime = nil   -- for double middle-click detection
 
 -- Remember drawing state when opening load popup
 local wasDrawingBeforeLoad = false
@@ -256,8 +255,18 @@ end
 -- Windows: main + load popup
 --------------------------------------------------------------------------------
 
--- Main window (draggable); positioned on screen by Initialize/ViewResize
+-- Main window (draggable)
 local mainX, mainY
+
+-- Window placement -- the one place to change where the window sits.
+-- Right-aligned and vertically centred, kept at least MAIN_SCREEN_MARGIN from
+-- the screen edges. Return plain numbers instead of the math to pin it.
+local MAIN_SCREEN_MARGIN = 20
+local function MidScreen(vsx, vsy, w, h)
+  return math.max(MAIN_SCREEN_MARGIN, vsx - w - MAIN_SCREEN_MARGIN),
+         math.max(MAIN_SCREEN_MARGIN, (vsy - h) / 2)
+end
+
 local mainDragging     = false
 local mainDragDX, mainDragDY = 0, 0
 local MAIN_TITLE_H     = 24
@@ -1145,18 +1154,6 @@ function widget:MousePress(mx, my, button)
       return true
     end
     return true -- consume clicks while dialog open
-  end
-  -- Double middle mouse: toggle draw OFF
-  if button == 2 then
-    local now = Spring.GetGameSeconds and Spring.GetGameSeconds() or os.clock()
-    local dt  = lastMidClickTime and (now - lastMidClickTime) or math.huge
-    if dt < 0.35 then
-      drawingMode = false
-      Spring.Echo("[LayoutPlus] Drawing: OFF (double middle-click)")
-      lastMidClickTime = nil
-      return true
-    end
-    lastMidClickTime = now
   end
   -- Handle load popup first
   if loadPopupVisible then
@@ -2180,8 +2177,7 @@ function widget:Initialize()
   local vsx, vsy = gl.GetViewSizes()
   local contentH = MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10 + 20 + 5
   local h        = contentH + MAIN_PADDING * 2
-  mainX = math.max(20, (vsx - MAIN_WIDTH) / 2)
-  mainY = math.max(20, (vsy - h) / 2)
+  mainX, mainY = MidScreen(vsx, vsy, MAIN_WIDTH, h)
   -- Start load popup over the main window
   loadX, loadY = mainX, mainY
   Spring.Echo("[LayoutPlus] LayoutPlannerPlus initialized, found " .. tostring(#savedLayouts) .. " layouts")
@@ -2194,8 +2190,7 @@ function widget:ViewResize()
   local vsx, vsy = gl.GetViewSizes()
   local contentH = MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10 + 20 + 5
   local h        = contentH + MAIN_PADDING * 2
-  mainX = math.max(20, (vsx - MAIN_WIDTH) / 2)
-  mainY = math.max(20, (vsy - h) / 2)
+  mainX, mainY = MidScreen(vsx, vsy, MAIN_WIDTH, h)
   loadX, loadY = mainX, mainY
   -- Corner radius and padding are derived from the viewport, so the glass
   -- metrics and the blur shapes are rebuilt for the new size.
