@@ -107,22 +107,167 @@ local function IsCaretVisible()
 end
 
 --------------------------------------------------------------------------------
+-- Glass UI: FlowUI-based skin matching BAR's F11 widget selector
+--
+-- The panels are drawn with the game's own FlowUI primitives (chamfered
+-- corners, tiled glass fill, gloss, feathered outline) and the world behind
+-- them is blurred by gfx_guishader, which is what gives the widget selector
+-- its look. Nothing here changes any geometry: the same rects the hit tests
+-- already use are simply painted differently.
+--------------------------------------------------------------------------------
+
+local GLASS = {
+  white        = { 1, 1, 1 },
+  hoverOpacity = 0.14,
+  selectedFill = { 1, 1, 1, 0.13 },
+  buttonFill   = { 0.18, 0.18, 0.18, 1 },
+  dangerFill   = { 0.46, 0.10, 0.10, 1 },
+  confirmFill  = { 0.17, 0.38, 0.21, 1 },
+  drawOnFill   = { 0.15, 0.42, 0.22, 1 },
+  loadFill     = { 0.16, 0.26, 0.52, 1 },
+  renderFill   = { 0.30, 0.20, 0.50, 1 },
+  accentFill   = { 0.20, 0.42, 0.68, 1 },
+  barTrack     = { 0, 0, 0, 0.35 },
+  barThumb     = { 1, 1, 1, 0.35 },
+}
+
+-- FlowUI's button gradients a fill from a darker bottom to itself on top.
+-- Derived once per fill and kept, because the pair is passed on every draw.
+local glassGradients = setmetatable({}, {
+  __index = function(self, fill)
+    local pair = {
+      { fill[1] * 0.55, fill[2] * 0.55, fill[3] * 0.55, fill[4] or 1 },
+      { fill[1], fill[2], fill[3], fill[4] or 1 },
+    }
+    self[fill] = pair
+    return pair
+  end,
+})
+
+-- Resolved FlowUI entry points. Re-resolved on init/resize so a late-loading
+-- FlowUI is picked up, and every helper degrades to a flat rect without it.
+local glass = { ready = false }
+
+local function RefreshGlass()
+  local f = WG and WG.FlowUI
+  if not f then
+    glass.ready = false
+    return
+  end
+  glass.element        = f.Draw.Element
+  glass.button         = f.Draw.Button
+  glass.rectRound      = f.Draw.RectRound
+  glass.highlight      = f.Draw.SelectHighlight
+  glass.elementCorner  = f.elementCorner or 4
+  glass.elementPadding = f.elementPadding or 4
+  glass.opacity        = f.clampedOpacity or 1
+  glass.ready          = (f.Draw.Element and f.Draw.RectRound and f.Draw.Button and f.Draw.SelectHighlight)
+    and true or false
+end
+
+local function InRect(mx, my, l, b, r, t)
+  return mx >= l and mx <= r and my >= b and my <= t
+end
+
+-- Blur regions handed to gfx_guishader. A list is only rebuilt when its rect
+-- actually moves: inserting one dirties the stencil, and doing that every
+-- frame would rebuild it every frame.
+local glassBlurList = {}
+local glassBlurRect = {}
+
+local function SetGlassBlur(name, l, b, r, t)
+  if not l then
+    local list = glassBlurList[name]
+    if list then
+      if WG and WG.guishader then WG.guishader.RemoveDlist(name) end
+      gl.DeleteList(list)
+      glassBlurList[name] = nil
+      glassBlurRect[name] = nil
+    end
+    return
+  end
+  if not (glass.ready and WG and WG.guishader) then
+    return
+  end
+  local was = glassBlurRect[name]
+  if was and was[1] == l and was[2] == b and was[3] == r and was[4] == t then
+    return
+  end
+  local old = glassBlurList[name]
+  if old then gl.DeleteList(old) end
+
+  local pad, corner, rectRound = glass.elementPadding, glass.elementCorner, glass.rectRound
+  local list = gl.CreateList(function()
+    gl.Texture(false)
+    rectRound(l - pad, b - pad, r + pad, t + pad, corner)
+  end)
+  glassBlurList[name] = list
+  glassBlurRect[name] = { l, b, r, t }
+  WG.guishader.InsertDlist(list, name, nil, widget)
+end
+
+local function RemoveAllGlassBlur()
+  local names = {}
+  for name in pairs(glassBlurList) do names[#names + 1] = name end
+  for _, name in ipairs(names) do SetGlassBlur(name, nil) end
+end
+
+-- A whole glass panel: the widget-selector window skin.
+local function GlassPanel(l, b, r, t)
+  if glass.ready then
+    glass.element(l, b, r, t, 1, 1, 1, 1, 1, 1, 1, 1, glass.opacity)
+  else
+    gl.Color(0.08, 0.08, 0.08, 0.85)
+    gl.Rect(l, b, r, t)
+  end
+end
+
+-- A recessed area inside a panel: title bands, fields, list and thumb boxes.
+local function GlassInset(l, b, r, t, alpha, cornerMult)
+  if glass.ready then
+    glass.rectRound(l, b, r, t, glass.elementCorner * (cornerMult or 0.6), 1, 1, 1, 1,
+      { 0, 0, 0, alpha or 0.5 })
+  else
+    gl.Color(0.1, 0.1, 0.1, alpha or 0.7)
+    gl.Rect(l, b, r, t)
+  end
+end
+
+-- A glass button. `fill` is one of the GLASS fills; hover adds the same soft
+-- white highlight the selector's rows and buttons use.
+local function GlassButton(l, b, r, t, fill, hovered)
+  if glass.ready then
+    local g = glassGradients[fill]
+    glass.button(l, b, r, t, 1, 1, 1, 1, 1, 1, 1, 1, nil, g[1], g[2])
+    if hovered then
+      glass.highlight(l, b, r, t, glass.elementCorner * 0.7, GLASS.hoverOpacity, GLASS.white)
+    end
+  else
+    gl.Color(fill[1], fill[2], fill[3], fill[4])
+    gl.Rect(l, b, r, t)
+    if hovered then
+      gl.Color(1, 1, 1, GLASS.hoverOpacity)
+      gl.Rect(l, b, r, t)
+    end
+  end
+end
+
+--------------------------------------------------------------------------------
 -- Windows: main + load popup
 --------------------------------------------------------------------------------
 
--- Main window (draggable)
-local mainX, mainY     = 40, 200   -- will be overridden in Initialize based on screen size
+-- Main window (draggable); positioned on screen by Initialize/ViewResize
+local mainX, mainY
 local mainDragging     = false
 local mainDragDX, mainDragDY = 0, 0
 local MAIN_TITLE_H     = 24
 local MAIN_WIDTH       = 360
 local MAIN_PADDING     = 10   -- padding around elements
 
--- Load popup (draggable)
+-- Load popup (draggable); positioned on screen by Initialize/ViewResize
 local loadPopupVisible = false
-local loadX, loadY     = 200, 220
+local loadX, loadY
 local loadDragging     = false
-local loadDragDX, loadDragDY = 0, 0        -- unused with new drag math but kept for safety
 local loadDragStartMX, loadDragStartMY = 0, 0
 local loadOrigX, loadOrigY           = 0, 0
 local LOAD_TITLE_H     = 24
@@ -844,7 +989,10 @@ end
 
 -- Save dialog: draw + hit-test
 local function DrawSaveDialog()
-  if not showSaveDialog then return end
+  if not showSaveDialog then
+    SetGlassBlur("layoutplannerplus_save", nil)
+    return
+  end
 
   local vsx, vsy = gl.GetViewSizes()
   local dialogWidth = 420
@@ -852,27 +1000,16 @@ local function DrawSaveDialog()
   local dialogX = (vsx - dialogWidth) / 2
   local dialogY = (vsy - dialogHeight) / 2
 
-  -- Background
-  gl.Color(0.1, 0.1, 0.1, 0.95)
-  gl.Rect(dialogX, dialogY, dialogX + dialogWidth, dialogY + dialogHeight)
-
-  -- Border
-  gl.Color(0.5, 0.5, 0.5, 1.0)
-  gl.LineWidth(2)
-  gl.BeginEnd(GL.LINE_LOOP, function()
-    gl.Vertex(dialogX, dialogY)
-    gl.Vertex(dialogX + dialogWidth, dialogY)
-    gl.Vertex(dialogX + dialogWidth, dialogY + dialogHeight)
-    gl.Vertex(dialogX, dialogY + dialogHeight)
-  end)
+  -- Background: glass panel over a blurred world
+  SetGlassBlur("layoutplannerplus_save", dialogX, dialogY, dialogX + dialogWidth, dialogY + dialogHeight)
+  GlassPanel(dialogX, dialogY, dialogX + dialogWidth, dialogY + dialogHeight)
 
   -- Text
   gl.Color(1, 1, 1, 1)
   gl.Text("Save layout as:", dialogX + 10, dialogY + 78, 14, "")
 
   -- Input box
-  gl.Color(0.2, 0.2, 0.2, 1.0)
-  gl.Rect(dialogX + 10, dialogY + 48, dialogX + dialogWidth - 10, dialogY + 68)
+  GlassInset(dialogX + 10, dialogY + 48, dialogX + dialogWidth - 10, dialogY + 68, 0.45)
 
   gl.Color(1, 1, 1, 1)
   local displayText = saveNameText
@@ -884,26 +1021,29 @@ local function DrawSaveDialog()
   local textY = dialogY + 52
   gl.Text(displayText, textX, textY, 13, "")
   -- Blinking caret to indicate active text input
-  if showSaveDialog and IsCaretVisible() then
+  if IsCaretVisible() then
     local w = gl.GetTextWidth(displayText) * 13
     gl.Color(1, 1, 1, 1)
     gl.Text("|", textX + w + 2, textY, 13, "")
   end
 
   -- Buttons
+  local mx, my = Spring.GetMouseState()
   local btnY = dialogY + 14
   local btnWidth = 80
   local btnHeight = 24
 
   -- OK button
-  gl.Color(0.2, 0.6, 0.2, 1.0)
-  gl.Rect(dialogX + 10, btnY, dialogX + 10 + btnWidth, btnY + btnHeight)
+  local okX1, okX2 = dialogX + 10, dialogX + 10 + btnWidth
+  GlassButton(okX1, btnY, okX2, btnY + btnHeight, GLASS.confirmFill,
+    InRect(mx, my, okX1, btnY, okX2, btnY + btnHeight))
   gl.Color(1, 1, 1, 1)
   gl.Text("OK", dialogX + 10 + 26, btnY + 6, 13, "")
 
   -- Cancel button
-  gl.Color(0.6, 0.2, 0.2, 1.0)
-  gl.Rect(dialogX + dialogWidth - 10 - btnWidth, btnY, dialogX + dialogWidth - 10, btnY + btnHeight)
+  local cancelX1, cancelX2 = dialogX + dialogWidth - 10 - btnWidth, dialogX + dialogWidth - 10
+  GlassButton(cancelX1, btnY, cancelX2, btnY + btnHeight, GLASS.dangerFill,
+    InRect(mx, my, cancelX1, btnY, cancelX2, btnY + btnHeight))
   gl.Color(1, 1, 1, 1)
   gl.Text("Cancel", dialogX + dialogWidth - 10 - 48, btnY + 6, 13, "")
 end
@@ -1656,75 +1796,79 @@ function widget:DrawScreen()
   gl.Blending(true)
   gl.DepthTest(false)
 
+  if not glass.ready then RefreshGlass() end
+  local mx, my = Spring.GetMouseState()
+
   -- main window (fixed content height + padding)
   local contentH = MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10 + 20 + 5
   local h        = contentH + MAIN_PADDING * 2
-  gl.Color(0, 0, 0, 0.7)
-  gl.Rect(mainX, mainY, mainX + MAIN_WIDTH, mainY + h)
+  local mainTop  = mainY + h
 
-  gl.Color(0.1, 0.1, 0.1, 0.95)
-  gl.Rect(mainX, mainY + h - MAIN_TITLE_H, mainX + MAIN_WIDTH, mainY + h)
+  SetGlassBlur("layoutplannerplus_main", mainX, mainY, mainX + MAIN_WIDTH, mainTop)
+  GlassPanel(mainX, mainY, mainX + MAIN_WIDTH, mainTop)
 
+  -- title band
+  GlassInset(mainX + 1, mainTop - MAIN_TITLE_H, mainX + MAIN_WIDTH - 1, mainTop - 1, 0.5)
   gl.Color(1, 0.7, 0.2, 1)
-  gl.Text("LayoutPlannerPlus", mainX + 8, mainY + h - MAIN_TITLE_H + 4, 14, "")
-  
+  gl.Text("LayoutPlannerPlus", mainX + 8, mainTop - MAIN_TITLE_H + 4, 14, "")
+
   -- Exit button in title bar (top-right)
   local exitBtnX = mainX + MAIN_WIDTH - 24
-  local exitBtnY = mainY + h - MAIN_TITLE_H + 2
-  gl.Color(0.6, 0.2, 0.2, 0.9)
-  gl.Rect(exitBtnX, exitBtnY, exitBtnX + 20, exitBtnY + 20)
+  local exitBtnY = mainTop - MAIN_TITLE_H + 2
+  GlassButton(exitBtnX, exitBtnY, exitBtnX + 20, exitBtnY + 20, GLASS.dangerFill,
+    InRect(mx, my, exitBtnX, exitBtnY, exitBtnX + 20, exitBtnY + 20))
   gl.Color(1, 1, 1, 1)
   gl.Text("×", exitBtnX + 6, exitBtnY + 2, 16, "")
 
   local btns = MainButtonsLayout()
   -- draw buttons
   for id, pos in pairs(btns) do
-    local label, col
+    local label, fill
     if id == "draw" then
       label = drawingMode and "Draw: ON" or "Draw: OFF"
-      col = drawingMode and {0.2, 0.8, 0.2, 0.9} or {0.5, 0.5, 0.5, 0.9}
+      fill = drawingMode and GLASS.drawOnFill or GLASS.buttonFill
     elseif id == "clear" then
       label = "Clear"
-      col = {0.8, 0.2, 0.2, 0.9}
+      fill = GLASS.dangerFill
     elseif id == "save" then
       label = "Save"
-      col = {0.15, 0.6, 0.25, 0.9}
+      fill = GLASS.confirmFill
     elseif id == "load" then
       label = "Load"
       if #savedLayouts == 0 then
-        col = {0.3, 0.3, 0.3, 0.5}  -- Grey and semi-transparent when disabled
+        fill = GLASS.buttonFill  -- muted while there is nothing to load
       else
-        col = {0.3, 0.4, 1.0, 0.9}
+        fill = GLASS.loadFill
       end
     elseif id == "render" then
       label = "Render"
-      col = {0.4, 0.3, 0.8, 0.9}
+      fill = GLASS.renderFill
     end
-    gl.Color(col[1], col[2], col[3], col[4])
-    gl.Rect(mainX + pos.x, mainY + pos.y, mainX + pos.x + BTN_W, mainY + pos.y + BTN_H)
+    local l, b, r, t = mainX + pos.x, mainY + pos.y, mainX + pos.x + BTN_W, mainY + pos.y + BTN_H
+    local enabled = (id ~= "load") or (#savedLayouts > 0)
+    GlassButton(l, b, r, t, fill, enabled and InRect(mx, my, l, b, r, t))
     gl.Color(1,1,1,1)
     local tw = gl.GetTextWidth(label) * 12
-    local tx = mainX + pos.x + (BTN_W - tw)/2
-    local ty = mainY + pos.y + 6
+    local tx = l + (BTN_W - tw)/2
+    local ty = b + 6
     gl.Text(label, tx, ty, 12, "")
   end
 
   -- Line snap mode selector (only control row below main buttons)
   local snapY = mainY + MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10
-  gl.Color(0.2,0.2,0.2,0.9)
-  gl.Rect(mainX + 10, snapY, mainX + MAIN_WIDTH - 10, snapY + 20)
+  GlassInset(mainX + 10, snapY, mainX + MAIN_WIDTH - 10, snapY + 20)
   gl.Color(1,1,1,1)
   gl.Text("Line Snap:", mainX + 12, snapY + 4, 10, "")
   local snapLabels = {"Off", "Intersect", "Mid", "Third"}
-  x = mainX + 80
+  local snapX = mainX + 80
   for i = 0, 3 do
     local w = 60
-    local col = (i == lineSnapMode) and {0.3,0.6,0.9,0.9} or {0.15,0.15,0.15,0.9}
-    gl.Color(col[1], col[2], col[3], col[4])
-    gl.Rect(x, snapY + 2, x + w, snapY + 18)
+    local l, b, r, t = snapX, snapY + 2, snapX + w, snapY + 18
+    local fill = (i == lineSnapMode) and GLASS.accentFill or GLASS.buttonFill
+    GlassButton(l, b, r, t, fill, InRect(mx, my, l, b, r, t))
     gl.Color(1,1,1,1)
-    gl.Text(snapLabels[i+1], x+4, snapY + 5, 10, "")
-    x = x + w + 4
+    gl.Text(snapLabels[i+1], l + 4, snapY + 5, 10, "")
+    snapX = snapX + w + 4
   end
 
   -- hint text
@@ -1736,36 +1880,29 @@ function widget:DrawScreen()
   if loadPopupVisible then
     -- Get viewport size for coordinate conversion (Spring uses bottom-up coordinates)
     local vsx, vsy = gl.GetViewSizes()
-    
+
     -- Window background (convert to bottom-up)
-    gl.Color(0,0,0,0.8)
     local winY1 = vsy - (loadY + LOAD_HEIGHT)
     local winY2 = vsy - loadY
-    gl.Rect(loadX, winY1, loadX + LOAD_WIDTH, winY2)
+    SetGlassBlur("layoutplannerplus_load", loadX, winY1, loadX + LOAD_WIDTH, winY2)
+    GlassPanel(loadX, winY1, loadX + LOAD_WIDTH, winY2)
 
     -- Title bar (at TOP of window)
-    gl.Color(0.1,0.1,0.1,0.95)
-    local titleTop_td    = loadY
-    local titleBottom_td = loadY + LOAD_TITLE_H
-    local titleY1 = vsy - titleBottom_td
-    local titleY2 = vsy - titleTop_td
-    gl.Rect(loadX, titleY1, loadX + LOAD_WIDTH, titleY2)
+    GlassInset(loadX + 1, winY2 - LOAD_TITLE_H, loadX + LOAD_WIDTH - 1, winY2 - 1, 0.5)
 
     gl.Color(1,0.7,0.2,1)
     -- Place title text closer to the vertical middle of the header (baseline from bottom)
-    local titleFontSize = 14
     local titleBottom_td = loadY + LOAD_TITLE_H
     local titleTextBaseline_td = titleBottom_td - 6  -- ~6px above bottom of header
     local titleTextY = vsy - titleTextBaseline_td
-    gl.Text("LayoutPlannerPlus - Load Menu", loadX + 8, titleTextY, titleFontSize, "")
+    gl.Text("LayoutPlannerPlus - Load Menu", loadX + 8, titleTextY, 14, "")
 
     local r = LoadPopupRegions()
 
     -- search box (convert to bottom-up)
-    gl.Color(0.15,0.15,0.15,0.9)
     local searchY1 = vsy - (loadY + r.searchBox.y + r.searchBox.h)
     local searchY2 = vsy - (loadY + r.searchBox.y)
-    gl.Rect(loadX + r.searchBox.x, searchY1, loadX + r.searchBox.x + r.searchBox.w, searchY2)
+    GlassInset(loadX + r.searchBox.x, searchY1, loadX + r.searchBox.x + r.searchBox.w, searchY2, 0.45)
     gl.Color(0.9,0.9,0.9,1)
     local searchBoxTopY = loadY + r.searchBox.y  -- Top in top-down
     local searchTextY = vsy - (searchBoxTopY + r.searchBox.h - 4)  -- Text Y in bottom-up (centered vertically)
@@ -1773,145 +1910,139 @@ function widget:DrawScreen()
     local sX    = loadX + r.searchBox.x + 4
     gl.Text(sText, sX, searchTextY, 11, "")
     -- Blinking caret for search input while load popup is open
-    if loadPopupVisible and IsCaretVisible() then
+    if IsCaretVisible() then
       local w = gl.GetTextWidth(sText) * 11
       gl.Color(1,1,1,1)
       gl.Text("|", sX + w + 2, searchTextY, 11, "")
     end
 
     -- list box (convert to bottom-up)
-    gl.Color(0.1,0.1,0.1,0.9)
     local listY1 = vsy - (loadY + r.listBox.y + r.listBox.h)
     local listY2 = vsy - (loadY + r.listBox.y)
-    gl.Rect(loadX + r.listBox.x, listY1, loadX + r.listBox.x + r.listBox.w, listY2)
-    
+    GlassInset(loadX + r.listBox.x, listY1, loadX + r.listBox.x + r.listBox.w, listY2, 0.5)
+
     local rowH = 18
     local maxVisible = 18  -- Show max 18 items (increased from 10)
     local totalItems = #filteredLayouts
     local hasScrollbar = totalItems > maxVisible
     local scrollBarW = 8
-    
-    -- Clamp scroll offset - ensure items always start from top
+
+    -- Clamp scroll offset to a valid range
     local maxScroll = math.max(0, totalItems - maxVisible)
-    if totalItems <= maxVisible then
-      -- If we have fewer items than maxVisible, always start from top (scroll = 0)
-      listScrollOffset = 0
-    else
-      -- Clamp scroll offset to valid range
-      if listScrollOffset > maxScroll then
-        listScrollOffset = maxScroll
-      end
-      if listScrollOffset < 0 then
-        listScrollOffset = 0
-      end
-    end
-    
+    if listScrollOffset > maxScroll then listScrollOffset = maxScroll end
+    if listScrollOffset < 0 then listScrollOffset = 0 end
+
     -- Calculate item width (account for scrollbar if present)
     local itemW = r.listBox.w - 4  -- Default: full width minus padding
     if hasScrollbar then
       itemW = itemW - scrollBarW - 2  -- Make room for scrollbar
     end
-    
-    -- Render visible items (starting from scroll offset, top-aligned)
-    -- Force scroll offset to 0 when items should start from top
-    if totalItems <= maxVisible then
-      listScrollOffset = 0
-    end
-    local maxScroll = math.max(0, totalItems - maxVisible)
-    if listScrollOffset > maxScroll then
-      listScrollOffset = maxScroll
-    end
-    if listScrollOffset < 0 then
-      listScrollOffset = 0
-    end
-    
+
     -- Calculate positions: items start from TOP of list box
     -- Spring uses bottom-up coordinates (Y=0 at bottom), so convert coordinates
-    -- (vsx, vsy already retrieved at start of load popup rendering)
     local listBoxTopY = loadY + r.listBox.y  -- Top Y in top-down coordinates
     local listBoxBottomY = listBoxTopY + r.listBox.h
     local itemsToShow = math.min(maxVisible, totalItems - listScrollOffset)
-    
+
     -- Render items from top to bottom - convert to bottom-up coordinates
     for row = 0, itemsToShow - 1 do
       local itemIndex = listScrollOffset + row + 1
       if itemIndex > totalItems then
         break
       end
-      
+
       local item = filteredLayouts[itemIndex]
       -- Calculate top-down Y position
       local itemTopY = listBoxTopY + 2 + (row * rowH)
       local itemBottomY = itemTopY + rowH
-      
+
       -- Check if item would go beyond list box bottom
       if itemTopY + rowH > listBoxBottomY then
         break
       end
-      
+
       -- Convert to bottom-up coordinates for gl.Rect and gl.Text
       local rectY1 = vsy - itemBottomY  -- Bottom of item in bottom-up coords
       local rectY2 = vsy - itemTopY    -- Top of item in bottom-up coords
       local textY = vsy - (itemTopY + rowH - 4)  -- Text Y in bottom-up coords (centered vertically in row)
-      
+
+      local rowX1 = loadX + r.listBox.x + 2
+      local rowX2 = rowX1 + itemW
       local sel = (selectedIndex == itemIndex)
-      gl.Color(sel and 0.3 or 0.2, sel and 0.5 or 0.2, sel and 0.8 or 0.2, 0.9)
-      gl.Rect(loadX + r.listBox.x + 2, rectY1, loadX + r.listBox.x + 2 + itemW, rectY2)
+      if sel then
+        if glass.ready then
+          glass.rectRound(rowX1, rectY1, rowX2, rectY2, glass.elementCorner * 0.5, 1, 1, 1, 1, GLASS.selectedFill)
+        else
+          gl.Color(0.3,0.5,0.8,0.6)
+          gl.Rect(rowX1, rectY1, rowX2, rectY2)
+        end
+      elseif glass.ready and InRect(mx, my, rowX1, rectY1, rowX2, rectY2) then
+        glass.highlight(rowX1, rectY1, rowX2, rectY2, glass.elementCorner * 0.5, GLASS.hoverOpacity, GLASS.white)
+      end
       gl.Color(1,1,1,1)
       gl.Text(item.name or "?", loadX + r.listBox.x + 6, textY, 11, "")
     end
-    
+
     -- Draw scrollbar if needed (when more than maxVisible items)
     if hasScrollbar then
       local scrollBarX = loadX + r.listBox.x + r.listBox.w - scrollBarW - 2
       local scrollBarTopY = loadY + r.listBox.y + 2  -- Top in top-down coords
       local scrollBarBottomY = scrollBarTopY + (r.listBox.h - 4)  -- Bottom in top-down coords
       local scrollBarH = r.listBox.h - 4
-      
+
       -- Convert to bottom-up coordinates
       local scrollBarY1 = vsy - scrollBarBottomY  -- Bottom in bottom-up
       local scrollBarY2 = vsy - scrollBarTopY     -- Top in bottom-up
-      
+
       -- Scrollbar track (darker background)
-      gl.Color(0.15,0.15,0.15,0.95)
-      gl.Rect(scrollBarX, scrollBarY1, scrollBarX + scrollBarW, scrollBarY2)
-      
+      if glass.ready then
+        glass.rectRound(scrollBarX, scrollBarY1, scrollBarX + scrollBarW, scrollBarY2,
+          glass.elementCorner * 0.5, 1, 1, 1, 1, GLASS.barTrack)
+      else
+        gl.Color(0.15,0.15,0.15,0.95)
+        gl.Rect(scrollBarX, scrollBarY1, scrollBarX + scrollBarW, scrollBarY2)
+      end
+
       -- Scrollbar thumb (brighter, more visible)
+      local thumbY1, thumbY2
       if maxScroll > 0 then
         local thumbH = math.max(20, (maxVisible / totalItems) * scrollBarH)
         local thumbTopY = scrollBarTopY + (listScrollOffset / maxScroll) * (scrollBarH - thumbH)
-        local thumbBottomY = thumbTopY + thumbH
-        local thumbY1 = vsy - thumbBottomY
-        local thumbY2 = vsy - thumbTopY
-        gl.Color(0.6,0.6,0.6,0.95)
-        gl.Rect(scrollBarX + 1, thumbY1, scrollBarX + scrollBarW - 1, thumbY2)
+        thumbY1 = vsy - (thumbTopY + thumbH)
+        thumbY2 = vsy - thumbTopY
       else
         -- Full scrollbar when at top
+        thumbY1, thumbY2 = scrollBarY1, scrollBarY2
+      end
+      if glass.ready then
+        glass.rectRound(scrollBarX + 1, thumbY1, scrollBarX + scrollBarW - 1, thumbY2,
+          glass.elementCorner * 0.4, 1, 1, 1, 1, GLASS.barThumb)
+      else
         gl.Color(0.6,0.6,0.6,0.95)
-        gl.Rect(scrollBarX + 1, scrollBarY1, scrollBarX + scrollBarW - 1, scrollBarY2)
+        gl.Rect(scrollBarX + 1, thumbY1, scrollBarX + scrollBarW - 1, thumbY2)
       end
     end
 
     -- buttons (Load/Delete/Duplicate/Close)
     -- Convert to bottom-up coordinates (vsy already retrieved above)
-    local function drawBtn(b, label)
-      gl.Color(0.25,0.25,0.25,0.9)
+    local function drawBtn(b, label, fill)
       -- Convert button Y coordinates to bottom-up
       local btnTopY = loadY + b.y
       local btnBottomY = btnTopY + b.h
       local rectY1 = vsy - btnBottomY
       local rectY2 = vsy - btnTopY
-      gl.Rect(loadX + b.x, rectY1, loadX + b.x + b.w, rectY2)
+      local l, rr = loadX + b.x, loadX + b.x + b.w
+      GlassButton(l, rectY1, rr, rectY2, fill, InRect(mx, my, l, rectY1, rr, rectY2))
       gl.Color(1,1,1,1)
       local tw = gl.GetTextWidth(label) * 11
-      local tx = loadX + b.x + (b.w - tw)/2
+      local tx = l + (b.w - tw)/2
       local ty = vsy - (btnTopY + b.h - 8)  -- Convert text Y to bottom-up (moved higher in button)
       gl.Text(label, tx, ty, 11, "")
     end
-    drawBtn(r.btnLoad,  "Load")
-    drawBtn(r.btnDel,   "Delete")
-    drawBtn(r.btnDup,   "Copy")
-    drawBtn(r.btnClose, "Close")
+    drawBtn(r.btnLoad,  "Load",   GLASS.loadFill)
+    drawBtn(r.btnDel,   "Delete", GLASS.dangerFill)
+    drawBtn(r.btnDup,   "Copy",   GLASS.buttonFill)
+    drawBtn(r.btnClose, "Close",  GLASS.buttonFill)
 
     -- thumbnail (convert to bottom-up coordinates)
     if selectedData then
@@ -1921,14 +2052,15 @@ function widget:DrawScreen()
       local thumbBottomY_bu = vsy - (thumbTopY + 280)  -- Bottom in bottom-up (size=280)
       DrawThumbnailSelected(loadX + r.thumbBox.x, thumbBottomY_bu, 280)
     else
-      gl.Color(0.1,0.1,0.1,0.9)
       local thumbY1 = vsy - (loadY + r.thumbBox.y + r.thumbBox.h)
       local thumbY2 = vsy - (loadY + r.thumbBox.y)
-      gl.Rect(loadX + r.thumbBox.x, thumbY1, loadX + r.thumbBox.x + r.thumbBox.w, thumbY2)
+      GlassInset(loadX + r.thumbBox.x, thumbY1, loadX + r.thumbBox.x + r.thumbBox.w, thumbY2, 0.5)
       gl.Color(0.8,0.8,0.8,1)
       local thumbTextY = vsy - (loadY + r.thumbBox.y + 140)
       gl.Text("No layout selected", loadX + r.thumbBox.x + 90, thumbTextY, 12, "")
     end
+  else
+    SetGlassBlur("layoutplannerplus_load", nil)
   end
 
   -- save dialog
@@ -2040,6 +2172,7 @@ end
 
 function widget:Initialize()
   Spring.Echo("[LayoutPlus] ===== INITIALIZING LayoutPlannerPlus =====")
+  RefreshGlass()
   EnsureLayoutDir()
   RefreshSavedLayouts()
   ApplySearchFilter()
@@ -2064,6 +2197,14 @@ function widget:ViewResize()
   mainX = math.max(20, (vsx - MAIN_WIDTH) / 2)
   mainY = math.max(20, (vsy - h) / 2)
   loadX, loadY = mainX, mainY
+  -- Corner radius and padding are derived from the viewport, so the glass
+  -- metrics and the blur shapes are rebuilt for the new size.
+  RefreshGlass()
+  RemoveAllGlassBlur()
+end
+
+function widget:Shutdown()
+  RemoveAllGlassBlur()
 end
 
 --------------------------------------------------------------------------------
