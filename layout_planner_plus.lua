@@ -24,7 +24,7 @@ local HALF_BU     = BU_SIZE/2
 local SQUARE_SIZE = 3 * BU_SIZE
 local CHUNK_SIZE  = 4 * SQUARE_SIZE
 
-local LAYOUT_DIR  = "LuaUI/Widgets/LayoutPlannerPlus/"
+local LAYOUT_DIR  = "LuaUI/Widgets/layout_planner_plus/"
 
 --------------------------------------------------------------------------------
 -- Layout data
@@ -715,7 +715,7 @@ local function RefreshSavedLayouts()
   savedLayouts = {}
 
   if VFS and VFS.DirList then
-    -- 1) New-format layouts in LayoutPlannerPlus folder
+    -- 1) New-format layouts in layout_planner_plus folder
     local files = VFS.DirList(LAYOUT_DIR, "*.txt", VFS.RAW_FIRST)
     for _, full in ipairs(files or {}) do
       local short = full:match("([^/\\]+)$") or full
