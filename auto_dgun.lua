@@ -34,9 +34,9 @@ local CMD_AUTO_DGUN_DESCRIPTION = {
     params = { 0, "auto_dgun_off", "auto_dgun_on" }
 }
 
-i18n.set("en.ui.orderMenu." .. CMD_AUTO_DGUN_DESCRIPTION.params[2], "Auto DGun Off")
-i18n.set("en.ui.orderMenu." .. CMD_AUTO_DGUN_DESCRIPTION.params[3], "Auto DGun On")
-i18n.set("en.ui.orderMenu." .. CMD_AUTO_DGUN_DESCRIPTION.action .. "_tooltip", "Auto-DGun enemies in range")
+i18n.set("en.commands." .. CMD_AUTO_DGUN_DESCRIPTION.params[2], "Auto DGun Off")
+i18n.set("en.commands." .. CMD_AUTO_DGUN_DESCRIPTION.params[3], "Auto DGun On")
+i18n.set("en.commands." .. CMD_AUTO_DGUN_DESCRIPTION.action .. "_tooltip", "Auto-DGun enemies in range")
 
 local commanderDefs = {}
 for uDefID, uDef in pairs(UnitDefs) do

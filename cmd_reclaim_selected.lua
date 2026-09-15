@@ -42,8 +42,8 @@ local CMD_RECLAIM_SELECTED_DESCRIPTION = {
     action = "reclaim_selected",
 }
 
-i18n.set("en.ui.orderMenu." .. CMD_RECLAIM_SELECTED_DESCRIPTION.action, "Reclaim Selected")
-i18n.set("en.ui.orderMenu." .. CMD_RECLAIM_SELECTED_DESCRIPTION.action .. "_tooltip", "Reclaim selected units")
+i18n.set("en.commands." .. CMD_RECLAIM_SELECTED_DESCRIPTION.action, "Reclaim Selected")
+i18n.set("en.commands." .. CMD_RECLAIM_SELECTED_DESCRIPTION.action .. "_tooltip", "Reclaim selected units")
 
 local NANO_DEFS = {}
 local MAX_DISTANCE = 0

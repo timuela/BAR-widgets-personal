@@ -62,10 +62,10 @@ local function advanceThreshold(entry)
 	return nil
 end
 
-BAR.I18N.set("en.ui.orderMenu.dynamic_queue_off", "DynamicQ Off")
-BAR.I18N.set("en.ui.orderMenu.dynamic_queue_on", "DynamicQ On")
-BAR.I18N.set("en.ui.orderMenu.dynamic_queue_yolo", "DynamicQ YOLO")
-BAR.I18N.set("en.ui.orderMenu.dynamic_queue_tooltip", "Advance the build queue based on each build's ETA, guard decaying nanoframes")
+BAR.I18N.set("en.commands.dynamic_queue_off", "DynamicQ Off")
+BAR.I18N.set("en.commands.dynamic_queue_on", "DynamicQ On")
+BAR.I18N.set("en.commands.dynamic_queue_yolo", "DynamicQ YOLO")
+BAR.I18N.set("en.commands.dynamic_queue_tooltip", "Advance the build queue based on each build's ETA, guard decaying nanoframes")
 
 local BUILDER_DEFS = {}
 local NANO_DEFS = {}
