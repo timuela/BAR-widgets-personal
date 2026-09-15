@@ -10,9 +10,7 @@ function widget:GetInfo()
   }
 end
 
---------------------------------------------------------------------------------
 -- Constants & basics
---------------------------------------------------------------------------------
 
 local Spring = Spring
 local gl     = gl
@@ -37,25 +35,22 @@ end
 
 local Editbox = VFS.Include("luaui/Include/keybind_editbox.lua")
 local Search  = VFS.Include("luaui/Include/search.lua")
+local KEYSYMS = VFS.Include("luaui/Include/keybind_keysyms.lua")
 
---------------------------------------------------------------------------------
 -- Layout data
---------------------------------------------------------------------------------
 
 local currentLayout = {
   lines = {}
 }
 
---------------------------------------------------------------------------------
 -- State: drawing & UI
---------------------------------------------------------------------------------
 
 local drawingMode      = false
 local drawingLinesMode = false
 
 -- Line drawing
-local lineStart        = nil    -- for free lines
-local removeDragStart  = nil    -- for right-drag removal box
+local lineStart        = nil
+local removeDragStart  = nil
 
 -- Remember drawing state when opening load popup
 local wasDrawingBeforeLoad = false
@@ -64,7 +59,7 @@ local wasDrawingBeforeLoad = false
 local showSaveDialog   = false
 
 -- Line snap modes: 0=none, 1=intersections, 2=midpoints, 3=thirds
-local lineSnapMode     = 1      -- default to intersections
+local lineSnapMode     = 1
 
 -- Rendering queue (for gradual rendering)
 local drawLineQueue    = {}
@@ -72,16 +67,16 @@ local renderTimer      = 0
 local renderingToGame  = false
 
 -- WASD key translation
-local allowTranslationByKeys = true  -- Whether layout can be shifted using keyboard keys
+local allowTranslationByKeys = true
 
 -- Library / saved layouts
-local savedLayouts     = {}     -- { { name, tags, filename, data }, ... }
+local savedLayouts     = {}
 local filteredLayouts  = {}
-local exitButtonClicked = false  -- Prevent exit button message spam
-local selectedIndex    = nil    -- index into filteredLayouts
-local selectedData     = nil    -- layout table of selected
-local listScrollOffset = 0      -- scroll offset for layout list (in items)
-local scrollDragging   = false  -- the popup's scrollbar is being dragged
+local exitButtonClicked = false
+local selectedIndex    = nil
+local selectedData     = nil
+local listScrollOffset = 0
+local scrollDragging   = false
 
 local searchBox, nameBox
 
@@ -89,15 +84,7 @@ local searchBox, nameBox
 local layoutRotation   = 0      -- rotation angle in degrees (0, 90, 180, 270)
 local layoutInverted  = false  -- horizontal inversion (flip x)
 
---------------------------------------------------------------------------------
--- Glass UI: FlowUI-based skin matching BAR's F11 widget selector
---
--- The panels are drawn with the game's own FlowUI primitives (chamfered
--- corners, tiled glass fill, gloss, feathered outline) and the world behind
--- them is blurred by gfx_guishader, which is what gives the widget selector
--- its look. Nothing here changes any geometry: the same rects the hit tests
--- already use are simply painted differently.
---------------------------------------------------------------------------------
+-- Glass UI: FlowUI-based skin matching BAR
 
 local GLASS = {
   white        = { 1, 1, 1 },
@@ -112,8 +99,7 @@ local GLASS = {
   accentFill   = { 0.20, 0.42, 0.68, 1 },
 }
 
--- FlowUI's button gradients a fill from a darker bottom to itself on top.
--- Derived once per fill and kept, because the pair is passed on every draw.
+-- FlowUI's button
 local glassGradients = setmetatable({}, {
   __index = function(self, fill)
     local pair = {
@@ -125,8 +111,7 @@ local glassGradients = setmetatable({}, {
   end,
 })
 
--- Resolved FlowUI entry points. Re-resolved on init/resize so a late-loading
--- FlowUI is picked up, and every helper degrades to a flat rect without it.
+-- Resolved FlowUI entry points.
 local glass = { ready = false }
 
 local function RefreshGlass()
@@ -148,9 +133,7 @@ local function RefreshGlass()
     and true or false
 end
 
--- Blur regions handed to gfx_guishader. A list is only rebuilt when its rect
--- actually moves: inserting one dirties the stencil, and doing that every
--- frame would rebuild it every frame.
+-- Blur regions handed to gfx_guishader.
 local glassBlurList = {}
 local glassBlurRect = {}
 
@@ -191,7 +174,6 @@ local function RemoveAllGlassBlur()
   for _, name in ipairs(names) do SetGlassBlur(name, nil) end
 end
 
--- A whole glass panel: the widget-selector window skin.
 local function GlassPanel(l, b, r, t)
   if glass.ready then
     glass.element(l, b, r, t, 1, 1, 1, 1, 1, 1, 1, 1, glass.opacity)
@@ -201,7 +183,6 @@ local function GlassPanel(l, b, r, t)
   end
 end
 
--- A recessed area inside a panel: title bands, fields, list and thumb boxes.
 local function GlassInset(l, b, r, t, alpha, cornerMult)
   if glass.ready then
     glass.rectRound(l, b, r, t, glass.elementCorner * (cornerMult or 0.6), 1, 1, 1, 1,
@@ -212,8 +193,6 @@ local function GlassInset(l, b, r, t, alpha, cornerMult)
   end
 end
 
--- A glass button. `fill` is one of the GLASS fills; hover adds the same soft
--- white highlight the selector's rows and buttons use.
 local function GlassButton(l, b, r, t, fill, hovered)
   if glass.ready then
     local g = glassGradients[fill]
@@ -231,8 +210,6 @@ local function GlassButton(l, b, r, t, fill, hovered)
   end
 end
 
--- A list row's lit state: the selector's fill for the chosen row, a soft white
--- wash under the cursor otherwise. Both lists light their rows the same way.
 local function MarkRow(l, b, r, t, fill)
   if glass.ready then
     if fill then
@@ -248,18 +225,12 @@ local function MarkRow(l, b, r, t, fill)
   gl.Rect(l, b, r, t)
 end
 
---------------------------------------------------------------------------------
--- Windows: main + load popup
---------------------------------------------------------------------------------
-
--- Main window (draggable)
+-- Main window
 local mainX, mainY
 
--- Window placement -- the one place to change where the window sits.
--- Right-aligned and vertically centred, kept at least MAIN_SCREEN_MARGIN from
--- the screen edges. Return plain numbers instead of the math to pin it.
+-- Right-aligned, vertically centred, MAIN_SCREEN_MARGIN from the screen edge.
 local MAIN_SCREEN_MARGIN = 20
-local function MidScreen(vsx, vsy, w, h)
+local function MainWindowPos(vsx, vsy, w, h)
   return math.max(MAIN_SCREEN_MARGIN, vsx - w - MAIN_SCREEN_MARGIN),
          math.max(MAIN_SCREEN_MARGIN, (vsy - h) / 2)
 end
@@ -268,29 +239,24 @@ local mainDragging     = false
 local mainDragDX, mainDragDY = 0, 0
 local MAIN_TITLE_H     = 24
 local MAIN_WIDTH       = 360
-local MAIN_PADDING     = 10   -- padding around elements
+local MAIN_PADDING     = 10
 local BTN_W, BTN_H     = 80, 24
 
--- One row height for both lists, and how many rows the popup shows at once.
 local ROW_H            = 18
 local LIST_MAX_VISIBLE = 18
 
--- The snap row, and the saved-layout rows the main window offers under it.
 local SNAP_Y           = MAIN_TITLE_H + 10 + BTN_H + 8 + BTN_H + 10
 local MAIN_LIST_ROWS   = 3
 local MAIN_LIST_H      = 6 + MAIN_LIST_ROWS * ROW_H
--- Bottom of the list box, measured up from mainY (drawing is bottom-up).
 local MAIN_LIST_Y      = SNAP_Y + 20 + 6
 
 local DIALOG_W, DIALOG_H = 420, 110
 
--- One place for the window height: the drawing, every hit test and the drag
--- math all read it, so the list can be resized without them drifting apart.
 local function MainWindowHeight()
   return MAIN_LIST_Y + MAIN_LIST_H + 5 + MAIN_PADDING * 2
 end
 
--- Load popup (draggable); positioned on screen by Initialize/ViewResize
+-- Load popup;
 local loadPopupVisible = false
 local loadX, loadY
 local loadDragging     = false
@@ -301,9 +267,7 @@ local LOAD_WIDTH       = 520
 local LOAD_HEIGHT      = 400
 local LOAD_LIST_H      = LOAD_HEIGHT - LOAD_TITLE_H - 56
 
---------------------------------------------------------------------------------
 -- Coordinate helpers
---------------------------------------------------------------------------------
 
 local function WorldToBU(x, z)
   return math.floor(x / BU_SIZE), math.floor(z / BU_SIZE)
@@ -326,7 +290,6 @@ local function SnapBU(bx, bz, mode)
     return sx, sz
   elseif mode == 2 then
     -- "Mid": snap to 1.5 × Third = 1.5 BU = 24 game units
-    -- Convert to game units, snap, then back to BU
     local xWorld = bx * BU_SIZE
     local zWorld = bz * BU_SIZE
     local stepIGU = 16 * 1.5  -- 24 game units
@@ -341,17 +304,11 @@ local function SnapBU(bx, bz, mode)
   return bx, bz
 end
 
---------------------------------------------------------------------------------
 -- Layout transformation helpers
---------------------------------------------------------------------------------
 
--- Transform a BU coordinate (x, z) based on rotation and inversion
--- rotation: 0, 90, 180, or 270 degrees
--- inverted: if true, flip about Y axis (mirror left/right, negate x)
 local function TransformBU(x, z, rotation, inverted)
   local tx, tz = x, z
-  -- Apply inversion first (flip about Y axis = mirror left/right)
-  -- This makes inversion independent of rotation
+  -- inversion first, so it stays independent of rotation
   if inverted then
     tx = -tx
   end
@@ -366,9 +323,7 @@ local function TransformBU(x, z, rotation, inverted)
   return tx, tz
 end
 
---------------------------------------------------------------------------------
 -- Layout helpers
---------------------------------------------------------------------------------
 
 local function ClearCurrentLayout()
   currentLayout.lines = {}
@@ -423,11 +378,6 @@ local function GetSnappedCameraDirection(dx, dz)
   return tx, tz
 end
 
--- WASD translation is polled rather than event-driven. BAR's action handler runs
--- before every widget's KeyPress and consumes presses bound to registered
--- actions - "stop" is one of them, registered by the pregame build queue - so a
--- widget cannot count on receiving a movement key at all. Reading the pressed
--- set sidesteps both that and the engine's own binds for these letters.
 local MOVE_STEP_TIME = 0.1   -- seconds between steps while a movement key is held
 local moveStepTimer  = MOVE_STEP_TIME
 
@@ -438,13 +388,13 @@ local function UpdateKeyTranslation(dt)
   local keys = Spring.GetPressedKeys()
   local dx, dz = 0, 0
 
-  if keys[119] then dz = dz + 1 end -- W
-  if keys[115] then dz = dz - 1 end -- S
-  if keys[97]  then dx = dx - 1 end -- A
-  if keys[100] then dx = dx + 1 end -- D
+  if keys[KEYSYMS.W] then dz = dz + 1 end
+  if keys[KEYSYMS.S] then dz = dz - 1 end
+  if keys[KEYSYMS.A] then dx = dx - 1 end
+  if keys[KEYSYMS.D] then dx = dx + 1 end
 
   if dx == 0 and dz == 0 then
-    moveStepTimer = MOVE_STEP_TIME   -- idle again, so the next press steps at once
+    moveStepTimer = MOVE_STEP_TIME
     return
   end
 
@@ -459,12 +409,9 @@ local function UpdateKeyTranslation(dt)
   end
 end
 
---------------------------------------------------------------------------------
 -- Save / load: file format & IO
---------------------------------------------------------------------------------
 
 local function EnsureLayoutDir()
-  -- attempt to write a tiny test and remove it
   local f = io.open(LAYOUT_DIR .. ".test", "w")
   if f then
     f:write("ok")
@@ -521,8 +468,6 @@ local function SaveLayoutAs(name, tags)
 
   local minX, maxX, minZ, maxZ = ComputeBounds(currentLayout)
 
-  -- Coordinates are stored relative to the layout's own corner, so a layout
-  -- does not carry the map position it was drawn at.
   local lines = {}
   for _, ln in ipairs(currentLayout.lines) do
     lines[#lines + 1] = { ln[1] - minX, ln[2] - minZ, ln[3] - minX, ln[4] - minZ }
@@ -578,7 +523,7 @@ local function LoadLayoutData(raw)
   return layout
 end
 
--- Reads a profile written by SaveLayoutAs. Returns nil and a reason on failure.
+-- Reads profile
 local function ReadProfile(full)
   if not Json then
     return nil, "no JSON library"
@@ -599,8 +544,6 @@ local function ReadProfile(full)
   return raw
 end
 
--- The rows the main window shows: the first few saved layouts by file name.
--- Kept separate from filteredLayouts, which the load popup's search narrows.
 local mainListLayouts = {}
 
 local function RefreshMainList()
@@ -652,22 +595,17 @@ local function RefreshSavedLayouts()
       end
     end
   end
-
-  -- initial filtered list is full list
   filteredLayouts = savedLayouts
 
   RefreshMainList()
 end
 
 local function ApplySearchFilter()
-  -- Reset scroll when filter changes
   listScrollOffset = 0
 
   local query = Search.query(searchBox and searchBox:getText() or "")
   local out = {}
   for _, item in ipairs(savedLayouts) do
-    -- Search.matches wants the haystack already normalised; names are plain here,
-    -- so a name and its tags can simply be joined.
     local haystack = Search.normalize((item.name or "") .. " " .. table.concat(item.tags or {}, " "))
     if Search.matches(query, haystack) then
       out[#out + 1] = item
@@ -676,9 +614,7 @@ local function ApplySearchFilter()
   filteredLayouts = out
 end
 
---------------------------------------------------------------------------------
 -- Thumbnail rendering for selected layout
---------------------------------------------------------------------------------
 
 local function DrawThumbnailSelected(x0, y0, size)
   if not selectedData then
@@ -727,11 +663,8 @@ local function DrawThumbnailSelected(x0, y0, size)
   end)
 end
 
---------------------------------------------------------------------------------
 -- Drawing tools (world)
---------------------------------------------------------------------------------
 
--- Remove nearest line to BU point
 local function RemoveNearestLine(bx, bz, maxDist)
   maxDist = maxDist or 10
   local bestIdx = nil
@@ -762,12 +695,9 @@ local function RemoveNearestLine(bx, bz, maxDist)
   return false
 end
 
---------------------------------------------------------------------------------
 -- Rendering to game (map markers)
---------------------------------------------------------------------------------
 
--- Convert BU edge coordinates to world space and queue them for rendering.
--- Long edges are split into CHUNK_SIZE segments so the render is gradual.
+-- Long edges are split into CHUNK_SIZE segments so the render stays gradual.
 local function DrawEdges(edges)
   drawLineQueue = {}
 
@@ -802,8 +732,6 @@ local function DrawEdges(edges)
   renderingToGame = true
 end
 
--- Hands the current layout to the renderer. Buildings used to be expanded into
--- their merged outer contour here; the widget is line-only now.
 local function CollectAndDraw()
   local edges = {}
   for _, line in ipairs(currentLayout.lines) do
@@ -812,11 +740,8 @@ local function CollectAndDraw()
   DrawEdges(edges)
 end
 
---------------------------------------------------------------------------------
 -- Mouse handling
---------------------------------------------------------------------------------
 
--- Where the main window's buttons sit, as offsets from its bottom-left corner.
 local function MainButtonOffsets()
   local y = MAIN_TITLE_H + 10
   return {
@@ -831,23 +756,12 @@ end
 local SNAP_LABELS = { "Off", "Intersect", "Mid", "Third" }
 local SNAP_STEPS  = { "none", "3 BU (48 IGU)", "1.5 BU (24 IGU)", "1 BU (16 IGU)" }
 
---------------------------------------------------------------------------------
--- UI geometry
---
--- One description of where every control sits, in absolute bottom-up
--- coordinates, rebuilt each frame and read by both the drawing and the hit
--- tests. The two used to compute the same rectangles independently and in
--- different coordinate spaces, which is how a control's hit area drifts away
--- from the control itself.
---------------------------------------------------------------------------------
-
 local ui = {}
 
 local function RectHit(r, x, y)
   return r ~= nil and x >= r[1] and x <= r[3] and y >= r[2] and y <= r[4]
 end
 
--- The grab margin around a window for moving it.
 local function NearWindowEdge(win, x, y)
   local m = 5
   return x <= win[1] + m or x >= win[3] - m or y <= win[2] + m or y >= win[4] - m
@@ -883,8 +797,6 @@ local function BuildMainLayout()
   return L
 end
 
--- Offsets inside the popup are written the way its layout reads: from the
--- window's top-left corner, downwards. rel() makes one absolute and bottom-up.
 local function BuildPopupLayout(vsy)
   local function rel(x, y, w, h)
     local top = vsy - (loadY + y)
@@ -907,9 +819,6 @@ local function BuildPopupLayout(vsy)
   if listScrollOffset > L.maxScroll then listScrollOffset = L.maxScroll end
   if listScrollOffset < 0 then listScrollOffset = 0 end
 
-  -- The scrollbar's strip, and the thumb's rect taken from FlowUI's own
-  -- geometry, so where the bar is drawn and where it can be grabbed are the
-  -- same rectangle by construction.
   local barX2 = L.list[3] - 2
   L.bar           = { barX2 - 8, L.list[2] + 2, barX2, L.list[4] - 2 }
   L.scrollContent = total * ROW_H
@@ -950,8 +859,6 @@ local function RefreshUI()
   ui.dialog = showSaveDialog and BuildDialogLayout(vsx, vsy) or nil
 end
 
--- The name field's own drawing is the editbox's; only the panel and the two
--- buttons are ours.
 local function DrawSaveDialog()
   if not showSaveDialog then
     SetGlassBlur("layoutplannerplus_save", nil)
@@ -1009,7 +916,6 @@ function widget:MousePress(mx, my, button)
       return true
     end
 
-    -- drag by the title band
     if RectHit(P.titleBar, mx, my) then
       loadDragging = true
       loadDragStartMX, loadDragStartMY = mx, my
@@ -1017,13 +923,11 @@ function widget:MousePress(mx, my, button)
       return true
     end
 
-    -- the field takes clicks before anything behind it does
     if searchBox:mousePress(mx, my) then
       return true
     end
 
     if RectHit(P.btnClose, mx, my) then
-      -- just close; nothing follows the cursor and no preview is kept
       loadPopupVisible = false
       drawingMode      = wasDrawingBeforeLoad
       selectedIndex    = nil
@@ -1035,8 +939,6 @@ function widget:MousePress(mx, my, button)
     end
 
     if RectHit(P.btnLoad, mx, my) then
-      -- the highlighted layout is what Load carries over; the popup closes and
-      -- the layout follows the cursor
       if selectedIndex and filteredLayouts[selectedIndex] then
         loadPopupVisible = false
       end
@@ -1090,7 +992,6 @@ function widget:MousePress(mx, my, button)
       return true
     end
 
-    -- the scrollbar's whole strip takes the drag, so a near miss still grabs it
     if P.barThumb and RectHit(P.bar, mx, my) then
       scrollDragging = true
       return true
@@ -1107,16 +1008,12 @@ function widget:MousePress(mx, my, button)
       end
     end
 
-    -- while popup is open, block clicks from reaching world/drawing logic
     return true
   end
 
-  -- main window. A click that lands on the panel belongs to the panel, so it
-  -- stops here rather than falling through to the world behind it.
   local M = ui.main
   if button == 1 and RectHit(M.win, mx, my) then
     if RectHit(M.exit, mx, my) then
-      -- Disable widget (user can re-enable via F11 menu)
       if not exitButtonClicked then
         exitButtonClicked = true
         Spring.Echo("[LayoutPlannerPlus] Widget disabled. Re-enable via F11 menu.")
@@ -1128,7 +1025,6 @@ function widget:MousePress(mx, my, button)
     end
 
     if RectHit(M.buttons.draw, mx, my) then
-      -- While a layout is attached to the mouse, do NOT allow toggling draw mode.
       if selectedData then
         Spring.Echo("[LayoutPlannerPlus] Finish or cancel layout placement before toggling Draw")
         return true
@@ -1186,8 +1082,6 @@ function widget:MousePress(mx, my, button)
       end
     end
 
-    -- saved-layout rows: arm the layout for placement, the same state the load
-    -- popup leaves behind. Rendering stays a separate step.
     for i, item in ipairs(mainListLayouts) do
       local r = M.rows[i]
       if r and RectHit(r, mx, my) then
@@ -1200,7 +1094,6 @@ function widget:MousePress(mx, my, button)
       end
     end
 
-    -- the title band and the window's edges move the window
     if RectHit(M.titleBar, mx, my) or NearWindowEdge(M.win, mx, my) then
       mainDragging = true
       mainDragDX, mainDragDY = mx - mainX, my - mainY
@@ -1208,16 +1101,12 @@ function widget:MousePress(mx, my, button)
     return true
   end
 
-  -- placement of selected layout (when Draw: OFF)
   if not drawingMode and selectedData and button == 1 then
     local _, pos = Spring.TraceScreenRay(mx, my, true)
     if pos then
       local bx, bz = WorldToBU(pos[1], pos[3])
       local layout = selectedData
 
-      -- A profile stores its coordinates normalised to its own corner, so the
-      -- width/height it was saved at is what centres it under the cursor. A
-      -- profile without those falls back to its computed bounds.
       local cx, cz
       if layout.fileWidth and layout.fileHeight then
         local minSize = layout.fileMinSize or 1
@@ -1233,23 +1122,18 @@ function widget:MousePress(mx, my, button)
       if cx and cz then
         local shiftX, shiftZ = cx, cz
 
-        -- copy layout lines (with transformation and translation)
         for _, ln in ipairs(layout.lines) do
-          -- First translate to cursor-relative position
           local tx1, tz1 = ln[1] + (bx - shiftX), ln[2] + (bz - shiftZ)
           local tx2, tz2 = ln[3] + (bx - shiftX), ln[4] + (bz - shiftZ)
 
-          -- Then apply rotation/inversion relative to the placed center (bx, bz)
           local relX1, relZ1 = TransformBU(tx1 - bx, tz1 - bz, layoutRotation, layoutInverted)
           local relX2, relZ2 = TransformBU(tx2 - bx, tz2 - bz, layoutRotation, layoutInverted)
 
-          -- Final position
           local sx1, sz1 = relX1 + bx, relZ1 + bz
           local sx2, sz2 = relX2 + bx, relZ2 + bz
           AddLineBU(sx1, sz1, sx2, sz2)
         end
         Spring.Echo("[LayoutPlannerPlus] Placed layout at cursor")
-        -- stop following the mouse after placement and restore drawing state
         selectedData  = nil
         selectedIndex = nil
         drawingMode   = wasDrawingBeforeLoad
@@ -1260,7 +1144,6 @@ function widget:MousePress(mx, my, button)
     end
   end
 
-  -- drawing on map
   if not drawingMode then
     return false
   end
@@ -1273,11 +1156,9 @@ function widget:MousePress(mx, my, button)
   local bx, bz = WorldToBU(pos[1], pos[3])
 
   if button == 1 then
-    -- start line drawing
     lineStart = { bx = bx, bz = bz }
     return true
   elseif button == 3 then
-    -- start removal drag (click or box)
     removeDragStart = { bx = bx, bz = bz }
     return true
   end
@@ -1291,8 +1172,6 @@ function widget:MouseMove(mx, my, dx, dy, button)
     return
   end
   if loadDragging then
-    -- Mouse Y is bottom-up, loadY is top-down.
-    -- Horizontal movement is the same, vertical must be inverted to feel natural.
     local ddx = mx - loadDragStartMX
     local ddy = my - loadDragStartMY
     loadX = loadOrigX + ddx
@@ -1300,8 +1179,6 @@ function widget:MouseMove(mx, my, dx, dy, button)
     return
   end
   if scrollDragging and ui.popup then
-    -- The whole strip scrubs, so the thumb follows the cursor and a drag that
-    -- started near an end still reaches it.
     local P    = ui.popup
     local span = math.max(1, P.bar[4] - P.bar[2])
     local f    = (P.bar[4] - my) / span          -- 0 at the bottom, 1 at the top
@@ -1335,7 +1212,6 @@ function widget:MouseRelease(mx, my, button)
   local bx, bz = WorldToBU(pos[1], pos[3])
 
   if button == 1 then
-    -- drawing mode: finish line
     if not drawingMode then
       lineStart = nil
       removeDragStart = nil
@@ -1343,7 +1219,6 @@ function widget:MouseRelease(mx, my, button)
     end
 
     if lineStart then
-      -- free line with snap
       local sx1, sz1 = SnapBU(lineStart.bx, lineStart.bz, lineSnapMode)
       local sx2, sz2 = SnapBU(bx, bz, lineSnapMode)
       AddLineBU(sx1, sz1, sx2, sz2)
@@ -1355,12 +1230,10 @@ function widget:MouseRelease(mx, my, button)
     local sx, sz = removeDragStart.bx, removeDragStart.bz
     local dx, dz = math.abs(bx - sx), math.abs(bz - sz)
     if dx <= 1 and dz <= 1 then
-      -- click: remove nearest line
       if not RemoveNearestLine(bx, bz, 10) then
         Spring.Echo("[LayoutPlannerPlus] No line near click")
       end
     else
-      -- box selection: remove lines whose midpoint is inside box
       local minX, maxX = math.min(sx, bx), math.max(sx, bx)
       local minZ, maxZ = math.min(sz, bz), math.max(sz, bz)
       for i = #currentLayout.lines, 1, -1 do
@@ -1380,19 +1253,14 @@ function widget:MouseRelease(mx, my, button)
   return false
 end
 
---------------------------------------------------------------------------------
 -- Keyboard
---------------------------------------------------------------------------------
 
 function widget:KeyPress(key, mods, isRepeat)
-  -- While a field has focus it takes the keys; ESC and ENTER are the panel's,
-  -- and everything else (backspace, arrows, word motion, selection) is the
-  -- editbox's own.
   if showSaveDialog then
-    if key == 27 then
+    if key == KEYSYMS.ESCAPE then
       showSaveDialog = false
       nameBox:blur()
-    elseif key == 13 then
+    elseif key == KEYSYMS.RETURN then
       local name = nameBox:getText():gsub("^%s*(.-)%s*$", "%1")
       if name ~= "" then
         SaveLayoutAs(name, {})
@@ -1408,7 +1276,7 @@ function widget:KeyPress(key, mods, isRepeat)
   end
 
   if loadPopupVisible then
-    if key == 27 then -- ESC closes the popup and restores drawing state
+    if key == KEYSYMS.ESCAPE then
       loadPopupVisible = false
       drawingMode = wasDrawingBeforeLoad
       searchBox:blur()
@@ -1418,8 +1286,8 @@ function widget:KeyPress(key, mods, isRepeat)
     return true
   end
 
-  -- ESC while a layout is preview-following the mouse cancels that preview
-  if key == 27 and selectedData then
+  -- while a layout follows the cursor, ESC cancels that preview
+  if key == KEYSYMS.ESCAPE and selectedData then
     selectedData  = nil
     selectedIndex = nil
     drawingMode   = wasDrawingBeforeLoad
@@ -1428,8 +1296,8 @@ function widget:KeyPress(key, mods, isRepeat)
     return true
   end
 
-  -- ESC with only main window: force Draw OFF
-  if key == 27 and not loadPopupVisible and not showSaveDialog and not selectedData then
+  -- with only the main window up, ESC forces Draw OFF
+  if key == KEYSYMS.ESCAPE and not loadPopupVisible and not showSaveDialog and not selectedData then
     if drawingMode then
       drawingMode = false
       Spring.Echo("[LayoutPlannerPlus] Drawing: OFF (ESC)")
@@ -1437,20 +1305,21 @@ function widget:KeyPress(key, mods, isRepeat)
     end
   end
 
-  -- Rotation and inversion keys (only when layout is selected)
+  -- rotate and invert, only while a layout is following the cursor
   if selectedData then
-    if key == 114 then -- 'r' key
+    if key == KEYSYMS.R then
       layoutRotation = (layoutRotation + 90) % 360
       Spring.Echo("[LayoutPlannerPlus] Rotation: " .. layoutRotation .. "°")
       return true
-    elseif key == 105 then -- 'i' key
+    elseif key == KEYSYMS.I then
       layoutInverted = not layoutInverted
       Spring.Echo("[LayoutPlannerPlus] Inverted: " .. (layoutInverted and "Yes" or "No"))
       return true
     end
   end
   if allowTranslationByKeys and not showSaveDialog and not loadPopupVisible and not selectedData then
-    if key == 119 or key == 115 or key == 97 or key == 100 then
+    -- W A S D, claimed so the engine's own binds for them do not fire
+    if key == KEYSYMS.W or key == KEYSYMS.A or key == KEYSYMS.S or key == KEYSYMS.D then
       return true
     end
   end
@@ -1458,8 +1327,7 @@ function widget:KeyPress(key, mods, isRepeat)
   return false
 end
 
--- Typed characters come through here rather than KeyPress: that is what the
--- editbox expects, and it is where the unicode and the selection live.
+-- Characters arrive here, which is what the editbox expects.
 function widget:TextInput(char)
   if showSaveDialog then
     return nameBox:textInput(char)
@@ -1484,9 +1352,7 @@ function widget:MouseWheel(up, value)
   return true
 end
 
---------------------------------------------------------------------------------
 -- DrawScreen: main window + popup
---------------------------------------------------------------------------------
 
 function widget:DrawScreen()
   gl.Color(1, 1, 1, 1)
@@ -1507,7 +1373,7 @@ function widget:DrawScreen()
   gl.Color(1, 0.7, 0.2, 1)
   gl.Text("LayoutPlannerPlus", M.titleBar[1] + 8, M.titleBar[2] + 4, 14, "")
 
-  -- Exit button in title bar (top-right)
+  -- Exit button
   GlassButton(M.exit[1], M.exit[2], M.exit[3], M.exit[4], GLASS.dangerFill, RectHit(M.exit, mx, my))
   gl.Color(1, 1, 1, 1)
   gl.Text("×", M.exit[1] + 6, M.exit[2] + 2, 16, "")
@@ -1528,7 +1394,7 @@ function widget:DrawScreen()
     gl.Text(look[1], r[1] + ((r[3] - r[1]) - tw)/2, r[2] + 6, 12, "")
   end
 
-  -- Line snap mode selector (only control row below main buttons)
+  -- Line snap mode selector
   GlassInset(M.snapRow[1], M.snapRow[2], M.snapRow[3], M.snapRow[4])
   gl.Color(1,1,1,1)
   gl.Text("Line Snap:", M.snapRow[1] + 2, M.snapRow[2] + 4, 10, "")
@@ -1540,9 +1406,7 @@ function widget:DrawScreen()
     gl.Text(SNAP_LABELS[i+1], r[1] + 4, r[2] + 3, 10, "")
   end
 
-  -- Saved layouts, first three by file name. Picking one arms it for placement
-  -- exactly as the load popup does; nothing is drawn to the map here, that is
-  -- still the Render button.
+  -- first three saved layouts by file name; picking one arms it for placement
   GlassInset(M.list[1], M.list[2], M.list[3], M.list[4])
 
   if #mainListLayouts == 0 then
@@ -1564,8 +1428,7 @@ function widget:DrawScreen()
     end
   end
 
-  -- Key hints. A layout armed for placement answers to different keys than one
-  -- still being drawn, so the line shows whichever set is live right now.
+  -- hints for whichever state is live: armed for placement, or drawing
   gl.Color(1,1,1,0.8)
   local hintText
   if selectedData then
@@ -1575,18 +1438,18 @@ function widget:DrawScreen()
   end
   gl.Text(hintText, mainX + 10, mainY + 10, 11, "")
 
-  -- load popup
+  -- Load popup
   local P = ui.popup
   if P then
     SetGlassBlur("layoutplannerplus_load", P.win[1], P.win[2], P.win[3], P.win[4])
     GlassPanel(P.win[1], P.win[2], P.win[3], P.win[4])
 
-    -- Title bar (at TOP of window)
+    -- Title bar
     GlassInset(P.titleBar[1] + 1, P.titleBar[2], P.titleBar[3] - 1, P.titleBar[4] - 1, 0.5)
     gl.Color(1,0.7,0.2,1)
     gl.Text("LayoutPlannerPlus - Load Menu", P.titleBar[1] + 8, P.titleBar[2] + 6, 14, "")
 
-    -- The search field draws itself, background and all.
+    -- Search field
     searchBox:setRect(P.search[1], P.search[2], P.search[3], P.search[4], 11)
     searchBox:draw()
 
@@ -1607,7 +1470,7 @@ function widget:DrawScreen()
       end
     end
 
-    -- Scrollbar, drawn and grabbable from the same geometry.
+    -- Scrollbar
     if P.barThumb and glass.scroller then
       glass.scroller(P.bar[1], P.bar[2], P.bar[3], P.bar[4], P.scrollContent, P.scrollPos,
         RectHit(P.barThumb, mx, my), scrollDragging)
@@ -1638,16 +1501,11 @@ function widget:DrawScreen()
   DrawSaveDialog()
 end
 
---------------------------------------------------------------------------------
 -- DrawWorld: preview, placed layout, and rendered lines
---------------------------------------------------------------------------------
 
 function widget:DrawWorld()
   gl.DepthTest(true)
 
-  ----------------------------------------------------------------------
-  -- 1. Current layout being edited (green)
-  ----------------------------------------------------------------------
   gl.Color(0, 1, 0, 0.7)
   gl.LineWidth(2)
   gl.BeginEnd(GL.LINES, function()
@@ -1661,9 +1519,7 @@ function widget:DrawWorld()
     end
   end)
 
-  ----------------------------------------------------------------------
-  -- 3. Live preview line while drawing (yellow)
-  ----------------------------------------------------------------------
+  -- live preview line
   if drawingMode and lineStart then
     local mx, my = Spring.GetMouseState()
     local _, pos = Spring.TraceScreenRay(mx, my, true)
@@ -1685,9 +1541,7 @@ function widget:DrawWorld()
     end
   end
 
-  ----------------------------------------------------------------------
-  -- 4. Selected layout preview following cursor (orange)
-  ----------------------------------------------------------------------
+  -- selected layout following the cursor
   if selectedData and not loadPopupVisible then
     local mx, my = Spring.GetMouseState()
     local _, pos = Spring.TraceScreenRay(mx, my, true)
@@ -1737,12 +1591,9 @@ function widget:DrawWorld()
   gl.DepthTest(false)
 end
 
---------------------------------------------------------------------------------
 -- Initialization
---------------------------------------------------------------------------------
 
--- The two text fields. Built here rather than at file scope because the editbox
--- draws through the game's font objects, which do not exist until the game does.
+-- Built from Initialize rather than at load: onChange captures ApplySearchFilter
 local function CreateFields()
   if searchBox then
     return
@@ -1762,10 +1613,9 @@ function widget:Initialize()
   EnsureLayoutDir()
   RefreshSavedLayouts()
   ApplySearchFilter()
-  -- Position main window centered on screen
   local vsx, vsy = gl.GetViewSizes()
   local h        = MainWindowHeight()
-  mainX, mainY = MidScreen(vsx, vsy, MAIN_WIDTH, h)
+  mainX, mainY = MainWindowPos(vsx, vsy, MAIN_WIDTH, h)
   -- Start load popup over the main window
   loadX, loadY = mainX, mainY
   Spring.Echo("[LayoutPlannerPlus] LayoutPlannerPlus initialized, found " .. tostring(#savedLayouts) .. " layouts")
@@ -1773,14 +1623,12 @@ function widget:Initialize()
   Spring.Echo("[LayoutPlannerPlus] ===== INITIALIZATION COMPLETE =====")
 end
 
--- Keep the main window centered when the screen size changes
+-- Put the main window back in place when the screen size changes
 function widget:ViewResize()
   local vsx, vsy = gl.GetViewSizes()
   local h        = MainWindowHeight()
-  mainX, mainY = MidScreen(vsx, vsy, MAIN_WIDTH, h)
+  mainX, mainY = MainWindowPos(vsx, vsy, MAIN_WIDTH, h)
   loadX, loadY = mainX, mainY
-  -- Corner radius and padding are derived from the viewport, so the glass
-  -- metrics and the blur shapes are rebuilt for the new size.
   RefreshGlass()
   RemoveAllGlassBlur()
 end
@@ -1789,9 +1637,7 @@ function widget:Shutdown()
   RemoveAllGlassBlur()
 end
 
---------------------------------------------------------------------------------
 -- Console command helper to save with a name
---------------------------------------------------------------------------------
 
 function widget:TextCommand(cmd)
   local name = cmd:match("^layoutplus_save%s+(.+)$")
@@ -1803,16 +1649,13 @@ function widget:TextCommand(cmd)
   end
 end
 
---------------------------------------------------------------------------------
 -- Update: gradual rendering queue processing
---------------------------------------------------------------------------------
 function widget:Update(dt)
   UpdateKeyTranslation(dt)
 
   if not renderingToGame then return end
 
-  -- Draw slowly: Spring drops marker lines if they are added too quickly
-  -- (draw spam protection). 10 lines per 0.1s is the proven safe rate
+  -- 10 lines per 0.1s
   renderTimer = renderTimer + dt
   if renderTimer < 0.1 then return end
   renderTimer = 0
