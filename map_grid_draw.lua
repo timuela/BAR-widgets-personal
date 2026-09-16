@@ -1,7 +1,7 @@
 function widget:GetInfo()
     return {
         name      = "Grid Draw",
-        desc      = "Draws a build-border grid from external JSON profiles, matched by map name and game mode",
+        desc      = "Draws lines from external JSON profiles, matched by map name and game mode",
         author    = "Lu5ck",
         date      = "31 May 2025",
         layer     = 1,
@@ -10,28 +10,33 @@ function widget:GetInfo()
 end
 
 --[[
-Border values
-NONE = 0
-TOP = 1
-RIGHT = 2
-BOTTOM = 4
-LEFT = 8
-Diagonal \ = 16
-Diagonal / = 32
-
-For multiple borders in same cell, add the value together
-TOP and RIGHT border = 1 + 2 = 3
-
 Profiles live in:
 	LuaUI/Widgets/map_grid_profiles/<anything>.json
 
 A profile must set maps; gameModes is optional:
-    "maps": ["Full Metal Plate 1.7"],
-    "gameModes": ["IsCoop", "IsSinglePlayer", "IsSandbox", "IsPvE"]
+    {
+        "name": "...",
+        "match": {
+            "maps": ["Full Metal Plate 1.7"],
+            "gameModes": ["IsCoop", "IsSinglePlayer", "IsSandbox", "IsPvE"]
+        },
+        "lines": [
+            [x1, z1, x2, z2],
+            ...
+        ]
+    }
+
+Coordinates are in build units (1 BU = 16 elmos) from the map's north-west corner — the same
+unit layout_planner_plus stores its layouts in. Lines run at any angle and any length; there
+is no grid or cell alignment to satisfy.
 ]]--
 
 local PROFILE_DIR = "LuaUI/Widgets/map_grid_profiles/"
 local Json = Json or VFS.Include("common/luaUtilities/json.lua")
+
+local BU_SIZE = 16        -- 1 BU = 16 elmos, as in layout_planner_plus
+local CHUNK_SIZE = 192    -- long lines are split into pieces this size so the render stays gradual
+local MARKER_HEIGHT = 0   -- elmos above ground to draw at
 
 local drawLineQueue = {}
 local timer = 0
@@ -158,82 +163,52 @@ local function evaluate(profile)
 	return "map_match"
 end
 
-local function hasBit(val, bit)
-	return math.floor(val / bit) % 2 == 1
-end
-
-local function drawLine(y, startX, startZ, endX, endZ, maxLength)
-	local dx = endX - startX
-	local dz = endZ - startZ
+local function queueLine(x1, z1, x2, z2)
+	local dx = x2 - x1
+	local dz = z2 - z1
 	local length = math.sqrt(dx * dx + dz * dz)
+	if length == 0 then
+		return
+	end
 
-	local lengthCount = math.ceil(length / maxLength)
+	local chunks = math.ceil(length / CHUNK_SIZE)
+	for i = 0, chunks - 1 do
+		local t1 = i / chunks
+		local t2 = (i + 1) / chunks
 
-	for i = 0, lengthCount - 1 do
-		local t1 = i / lengthCount
-		local t2 = (i + 1) / lengthCount
-
-		local sx = startX + dx * t1
-		local sz = startZ + dz * t1
-		local ex = startX + dx * t2
-		local ez = startZ + dz * t2
-
-		table.insert(drawLineQueue, {startX = sx, startZ = sz, endX = ex, endZ = ez, y = y})
+		table.insert(drawLineQueue, {
+			startX = x1 + dx * t1,
+			startZ = z1 + dz * t1,
+			endX = x1 + dx * t2,
+			endZ = z1 + dz * t2,
+		})
 	end
 end
 
 -- Validates the profile against the running map and fills the draw queue.
 local function buildQueue(profile)
-	local grid = profile.grid
-	local mapping = profile.mapping
-	if type(grid) ~= "table" or type(mapping) ~= "table" then
-		return false, "missing grid/mapping"
-	end
-	local gridsize = grid.size
-	local gridsquare = grid.square
-	if type(gridsize) ~= "number" or type(gridsquare) ~= "number" then
-		return false, "grid.size and grid.square must be numbers"
-	end
-
-	local cellsize = gridsize * gridsquare
-	local expectedRows = Game.mapSizeZ / cellsize
-	local expectedCols = Game.mapSizeX / cellsize
-
-	if #mapping ~= expectedRows then
-		return false, "mapping has " .. #mapping .. " rows, expected " .. expectedRows
-	end
-	for row = 1, #mapping do
-		if #mapping[row] ~= expectedCols then
-			return false, "row " .. row .. " has " .. #mapping[row] .. " columns, expected " .. expectedCols
-		end
+	local lines = profile.lines
+	if type(lines) ~= "table" or #lines == 0 then
+		return false, "no \"lines\" list"
 	end
 
 	drawLineQueue = {}
-	for row = 1, #mapping do
-		for col = 1, #mapping[row] do
-			local val = mapping[row][col]
-			local x = (col - 1) * cellsize
-			local z = (row - 1) * cellsize
-
-			if hasBit(val, 1) then
-				drawLine(0, x, z, x + cellsize, z, 24 * gridsquare) -- Top
-			end
-			if hasBit(val, 2) then
-				drawLine(0, x + cellsize, z, x + cellsize, z + cellsize, 24 * gridsquare) -- Right
-			end
-			if hasBit(val, 4) then
-				drawLine(0, x, z + cellsize, x + cellsize, z + cellsize, 24 * gridsquare) -- Bottom
-			end
-			if hasBit(val, 8) then
-				drawLine(0, x, z, x, z + cellsize, 24 * gridsquare) -- Left
-			end
-			if hasBit(val, 16) then
-				drawLine(0, x, z, x + cellsize, z + cellsize, 24 * gridsquare) -- Diagonal \
-			end
-			if hasBit(val, 32) then
-				drawLine(0, x + cellsize, z, x, z + cellsize, 24 * gridsquare) -- Diagonal /
+	for index, line in ipairs(lines) do
+		if type(line) ~= "table" or #line ~= 4 then
+			drawLineQueue = {}
+			return false, "line " .. index .. " is not [x1, z1, x2, z2]"
+		end
+		for i = 1, 4 do
+			if type(line[i]) ~= "number" then
+				drawLineQueue = {}
+				return false, "line " .. index .. " has a non-numeric coordinate"
 			end
 		end
+		queueLine(line[1] * BU_SIZE, line[2] * BU_SIZE, line[3] * BU_SIZE, line[4] * BU_SIZE)
+	end
+
+	if #drawLineQueue == 0 then
+		return false, "every line is zero length"
 	end
 
 	return true
@@ -247,14 +222,14 @@ function widget:Initialize()
 
 	local profiles = loadProfiles()
 	if #profiles == 0 then
-		Spring.Echo("[GridDraw] No grid profiles found in " .. PROFILE_DIR .. ", disabling.")
+		Spring.Echo("[GridDraw] No profiles found in " .. PROFILE_DIR .. ", disabling.")
 		widgetHandler:RemoveWidget()
 		return
 	end
 
 	local chosen
 	local modeNeed  -- gameModes of the first profile whose map matched but mode did not
-	local sizeMiss  -- a profile matched, but its mapping did not fit this map size
+	local broken    -- a profile matched the map, but its lines could not be used
 
 	for _, profile in ipairs(profiles) do
 		local status = evaluate(profile)
@@ -264,7 +239,7 @@ function widget:Initialize()
 				chosen = profile
 				break
 			end
-			sizeMiss = true
+			broken = err
 			Spring.Echo("[GridDraw] Skipping " .. profile.filename .. ": " .. err)
 		elseif status == "mode_mismatch" then
 			modeNeed = modeNeed or profile.match.gameModes
@@ -280,10 +255,11 @@ function widget:Initialize()
 			Spring.Echo("[GridDraw] Map '" .. mapName .. "' is supported, but no profile matched the game mode"
 				.. " (profile accepts: " .. table.concat(modeNeed, ", ")
 				.. "; current: " .. (#active > 0 and table.concat(active, ", ") or "unknown") .. "), disabling.")
-		elseif sizeMiss then
-			Spring.Echo("[GridDraw] Map '" .. mapName .. "' has a profile, but its grid does not fit this map size, disabling.")
+		elseif broken then
+			Spring.Echo("[GridDraw] Map '" .. mapName .. "' has a profile, but its lines are unusable ("
+				.. broken .. "), disabling.")
 		else
-			Spring.Echo("[GridDraw] No grid profile for map '" .. mapName .. "', disabling.")
+			Spring.Echo("[GridDraw] No profile for map '" .. mapName .. "', disabling.")
 		end
 		widgetHandler:RemoveWidget()
 		return
@@ -304,7 +280,7 @@ function widget:Update(dt)
 				break
 			end
 			local data = table.remove(drawLineQueue, 1) -- Get and remove
-			Spring.MarkerAddLine(data.startX, data.y, data.startZ, data.endX, data.y, data.endZ)
+			Spring.MarkerAddLine(data.startX, MARKER_HEIGHT, data.startZ, data.endX, MARKER_HEIGHT, data.endZ)
 		end
 		timer = 0
 	end
