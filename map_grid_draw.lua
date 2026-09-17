@@ -9,28 +9,6 @@ function widget:GetInfo()
     }
 end
 
---[[
-Profiles live in:
-	LuaUI/Widgets/map_grid_profiles/<anything>.json
-
-A profile must set maps; gameModes is optional:
-    {
-        "name": "...",
-        "match": {
-            "maps": ["Full Metal Plate 1.7"],
-            "gameModes": ["IsCoop", "IsSinglePlayer", "IsSandbox", "IsPvE"]
-        },
-        "lines": [
-            [x1, z1, x2, z2],
-            ...
-        ]
-    }
-
-Coordinates are in build units (1 BU = 16 elmos) from the map's north-west corner — the same
-unit layout_planner_plus stores its layouts in. Lines run at any angle and any length; there
-is no grid or cell alignment to satisfy.
-]]--
-
 local PROFILE_DIR = "LuaUI/Widgets/map_grid_profiles/"
 local Json = Json or VFS.Include("common/luaUtilities/json.lua")
 
