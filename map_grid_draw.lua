@@ -2,7 +2,7 @@ function widget:GetInfo()
     return {
         name      = "Grid Draw",
         desc      = "Draws lines from external JSON profiles, matched by map name and game mode",
-        author    = "Lu5ck",
+        author    = "Lu5ck, timuela",
         date      = "31 May 2025",
         layer     = 1,
         enabled   = true
